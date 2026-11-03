@@ -13,7 +13,7 @@ import type {
   CreateModelResponse,
   UpdateModelResponse,
   DeleteModelResponse,
-} from '../types/models';
+} from './types/models';
 
 const WORKER_BASE_URL =
   (import.meta.env.VITE_WORKER_URL as string | undefined)?.replace(/\/$/, '') ||
