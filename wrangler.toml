@@ -1,0 +1,10 @@
+name = "shiny-bird-56fc"
+main = "worker.js"
+compatibility_date = "2024-04-01"
+
+# Secrets to be configured via `wrangler secret put`:
+# 1. FIREBASE_SERVICE_ACCOUNT (full JSON service account string with Datastore admin privileges)
+# 2. APP_URL (the origin of the frontend web application, for CORS)
+
+[vars]
+PROJECT_ID = "fc-founoun"

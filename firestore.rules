@@ -1,0 +1,36 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // Helper functions
+    function isAuthenticated() {
+      return request.auth != null;
+    }
+
+    function isSuperAdmin() {
+      return isAuthenticated() &&
+        exists(/databases/$(database)/documents/users/$(request.auth.uid)) &&
+        get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'super_admin' &&
+        get(/databases/$(database)/documents/users/$(request.auth.uid)).data.status == 'active';
+    }
+
+    // Users collection: users can read their own profile; only active super_admin can write
+    match /users/{userId} {
+      allow read: if isAuthenticated() && (request.auth.uid == userId || isSuperAdmin());
+      allow write: if isSuperAdmin();
+    }
+
+    // Models collection: Read allowed for all users / catalog viewers;
+    // Mutating operations (create, update, delete) are handled securely via Cloudflare Worker backend
+    match /models/{modelId} {
+      allow read: if true;
+      allow write: if isSuperAdmin();
+    }
+
+    // Model names reservation locks: Internal unique namespace index
+    match /model_names/{nameHash} {
+      allow read: if isAuthenticated();
+      allow write: if isSuperAdmin();
+    }
+  }
+}

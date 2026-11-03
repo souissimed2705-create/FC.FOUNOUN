@@ -1,0 +1,6 @@
+{
+  "name": "FC.FOUNOUN – فنون للأحذية",
+  "description": "بوابة تسجيل دخول المسؤول الرئيسي لتطبيق FC.FOUNOUN (فنون للأحذية) - PWA مخصص للهواتف الذكية بتصميم أسود وذهبي فاخر.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
