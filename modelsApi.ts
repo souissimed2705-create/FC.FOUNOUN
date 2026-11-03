@@ -6,7 +6,7 @@
  * (Create, Update, Delete) with Firebase ID Token authentication and RBAC.
  */
 
-import { auth } from './firebase';
+import { auth } from './lib/firebase';
 import type {
   CreateModelPayload,
   UpdateModelPayload,
