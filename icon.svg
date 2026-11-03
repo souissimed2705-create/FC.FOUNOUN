@@ -1,0 +1,84 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512">
+  <defs>
+    <linearGradient id="goldGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#BF953F" />
+      <stop offset="25%" stop-color="#FCF6BA" />
+      <stop offset="50%" stop-color="#B38728" />
+      <stop offset="75%" stop-color="#FBF5B7" />
+      <stop offset="100%" stop-color="#AA771C" />
+    </linearGradient>
+    <linearGradient id="bgGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#141414" />
+      <stop offset="50%" stop-color="#0A0A0A" />
+      <stop offset="100%" stop-color="#020202" />
+    </linearGradient>
+    <radialGradient id="goldGlow" cx="50%" cy="50%" r="50%">
+      <stop offset="0%" stop-color="#D4AF37" stop-opacity="0.25" />
+      <stop offset="100%" stop-color="#D4AF37" stop-opacity="0" />
+    </radialGradient>
+  </defs>
+
+  <!-- Background -->
+  <rect width="512" height="512" fill="url(#bgGrad)" />
+
+  <!-- Ambient Glow -->
+  <circle cx="256" cy="256" r="230" fill="url(#goldGlow)" />
+
+  <!-- Outer Luxury Border -->
+  <rect x="28" y="28" width="456" height="456" rx="28" fill="none" stroke="url(#goldGrad)" stroke-width="3" opacity="0.8" />
+  <rect x="42" y="42" width="428" height="428" rx="20" fill="none" stroke="url(#goldGrad)" stroke-width="1.5" stroke-dasharray="8 6" opacity="0.5" />
+
+  <!-- Corner Ornaments -->
+  <path d="M 52 75 L 75 75 L 75 52" fill="none" stroke="url(#goldGrad)" stroke-width="3" />
+  <path d="M 460 75 L 437 75 L 437 52" fill="none" stroke="url(#goldGrad)" stroke-width="3" />
+  <path d="M 52 437 L 75 437 L 75 460" fill="none" stroke="url(#goldGrad)" stroke-width="3" />
+  <path d="M 460 437 L 437 437 L 437 460" fill="none" stroke="url(#goldGrad)" stroke-width="3" />
+
+  <!-- Central Crest Crown/Stars -->
+  <g transform="translate(256, 130)">
+    <polygon points="0,-22 6,-8 20,-8 9,2 13,16 0,8 -13,16 -9,2 -20,-8 -6,-8" fill="url(#goldGrad)" transform="scale(0.8)" />
+    <polygon points="-40,-16 -35,-4 -23,-4 -32,4 -29,15 -40,8 -51,15 -48,4 -57,-4 -45,-4" fill="url(#goldGrad)" transform="scale(0.55)" />
+    <polygon points="40,-16 45,-4 57,-4 48,4 51,15 40,8 29,15 32,4 23,-4 35,-4" fill="url(#goldGrad)" transform="scale(0.55)" />
+  </g>
+
+  <!-- Monogram FC -->
+  <text x="256" y="248" 
+        font-family="'Playfair Display', 'Cinzel', 'Times New Roman', serif" 
+        font-size="106" 
+        font-weight="700" 
+        letter-spacing="4" 
+        fill="url(#goldGrad)" 
+        text-anchor="middle"
+        filter="drop-shadow(0px 4px 12px rgba(0,0,0,0.8))">
+    FC
+  </text>
+
+  <!-- Divider Line with Diamond -->
+  <g transform="translate(256, 280)">
+    <line x1="-120" y1="0" x2="-20" y2="0" stroke="url(#goldGrad)" stroke-width="2" />
+    <polygon points="0,-6 6,0 0,6 -6,0" fill="url(#goldGrad)" />
+    <line x1="20" y1="0" x2="120" y2="0" stroke="url(#goldGrad)" stroke-width="2" />
+  </g>
+
+  <!-- FOUNOUN Brand Text -->
+  <text x="256" y="325" 
+        font-family="'Montserrat', 'Cinzel', 'Helvetica Neue', sans-serif" 
+        font-size="28" 
+        font-weight="700" 
+        letter-spacing="10" 
+        fill="#FFFFFF" 
+        text-anchor="middle">
+    FOUNOUN
+  </text>
+
+  <!-- Arabic Tagline -->
+  <text x="256" y="375" 
+        font-family="'Cairo', 'Tajawal', 'Amiri', sans-serif" 
+        font-size="24" 
+        font-weight="600" 
+        letter-spacing="2" 
+        fill="url(#goldGrad)" 
+        text-anchor="middle">
+    فنون للأحذية
+  </text>
+</svg>
