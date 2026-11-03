@@ -1,0 +1,180 @@
+/**
+ * @license
+ * SPDX-License-Identifier: Apache-2.0
+ */
+
+import React, { useState, useEffect } from 'react';
+import { AdminLoginForm } from './components/AdminLoginForm';
+import { AdminDashboard } from './components/AdminDashboard';
+import { PWAInstallBadge } from './components/PWAInstallBadge';
+import { useOnlineStatus } from './hooks/useOnlineStatus';
+import { WifiOff, Sparkles, Crown } from 'lucide-react';
+import { onAuthStateChanged, signOut } from 'firebase/auth';
+import {
+  auth,
+  verifySuperAdmin,
+  UserProfile,
+  mapAuthorizationErrorToArabic,
+} from './lib/firebase';
+
+export default function App() {
+  const isOnline = useOnlineStatus();
+  const [verifiedAdmin, setVerifiedAdmin] = useState<UserProfile | null>(null);
+  const [isCheckingInitialAuth, setIsCheckingInitialAuth] = useState(true);
+  const [sessionError, setSessionError] = useState<string | null>(null);
+  const [isLoggingOut, setIsLoggingOut] = useState(false);
+
+  // Synchronize and verify current active session against Firestore RBAC
+  useEffect(() => {
+    const unsubscribe = onAuthStateChanged(auth, async (user) => {
+      if (user) {
+        try {
+          // Verify role and status in users/{uid}
+          const profile = await verifySuperAdmin(user.uid);
+          setVerifiedAdmin(profile);
+          setSessionError(null);
+        } catch (err: unknown) {
+          // If doc missing, wrong role, or inactive -> immediately signOut
+          await signOut(auth);
+          setVerifiedAdmin(null);
+
+          const errorObj = err as { message?: string; code?: string };
+          setSessionError(
+            mapAuthorizationErrorToArabic(errorObj?.message || errorObj?.code || '')
+          );
+        }
+      } else {
+        setVerifiedAdmin(null);
+      }
+      setIsCheckingInitialAuth(false);
+    });
+
+    return () => unsubscribe();
+  }, []);
+
+  const handleLogout = async () => {
+    setIsLoggingOut(true);
+    try {
+      await signOut(auth);
+      setVerifiedAdmin(null);
+      setSessionError(null);
+    } catch (err) {
+      console.error('Logout error:', err);
+    } finally {
+      setIsLoggingOut(false);
+    }
+  };
+
+  return (
+    <div className="min-h-screen bg-[#080808] text-white flex flex-col justify-between relative selection:bg-[#D4AF37]/30 selection:text-[#F3E5AB]">
+      {/* Background Luxury Ambient Glows */}
+      <div className="fixed inset-0 pointer-events-none overflow-hidden z-0">
+        <div className="absolute -top-32 left-1/2 -translate-x-1/2 w-96 h-96 bg-[#D4AF37]/10 rounded-full blur-[120px]"></div>
+        <div className="absolute -bottom-32 right-1/4 w-80 h-80 bg-[#B38728]/5 rounded-full blur-[100px]"></div>
+      </div>
+
+      {/* Offline Status Banner */}
+      {!isOnline && (
+        <div className="relative z-50 bg-[#251A0A] border-b border-[#D4AF37]/40 px-4 py-2 text-center text-xs text-[#F5D77F] flex items-center justify-center gap-2">
+          <WifiOff className="w-3.5 h-3.5 text-[#D4AF37] animate-pulse" />
+          <span>أنت تعمل حالياً في وضع عدم الاتصال (PWA Offline)</span>
+        </div>
+      )}
+
+      {/* Top Bar / Navigation */}
+      <header className="relative z-10 w-full border-b border-white/5 bg-[#0A0A0A]/80 backdrop-blur-md px-4 sm:px-6 py-3.5">
+        <div className="max-w-4xl mx-auto flex items-center justify-between">
+          {/* Brand Monogram Left */}
+          <div className="flex items-center gap-2.5">
+            <div className="w-8 h-8 rounded-lg bg-gradient-to-br from-[#BF953F] via-[#FCF6BA] to-[#AA771C] p-[1px] shadow-sm">
+              <div className="w-full h-full bg-[#0E0E0E] rounded-[7px] flex items-center justify-center">
+                <Crown className="w-4 h-4 text-[#D4AF37]" />
+              </div>
+            </div>
+            <div className="flex flex-col">
+              <span className="font-['Cinzel'] tracking-widest text-xs font-bold text-white">
+                FC.FOUNOUN
+              </span>
+              <span className="text-[10px] text-gray-400 font-['Cairo'] -mt-0.5">
+                فنون للأحذية الفاخرة
+              </span>
+            </div>
+          </div>
+
+          {/* Right Action: PWA Install Button */}
+          <div className="flex items-center gap-2">
+            <PWAInstallBadge />
+          </div>
+        </div>
+      </header>
+
+      {/* Main Content Area */}
+      <main className="relative z-10 flex-1 flex flex-col items-center justify-center px-4 py-8 sm:py-12 w-full">
+        {isCheckingInitialAuth ? (
+          // Clean luxury initial loading spinner
+          <div className="flex flex-col items-center justify-center py-16 space-y-3">
+            <div className="w-10 h-10 border-2 border-[#D4AF37]/20 border-t-[#D4AF37] rounded-full animate-spin"></div>
+            <span className="text-xs text-gray-400 font-medium">
+              جاري فحص حالة الجلسة والأمان...
+            </span>
+          </div>
+        ) : verifiedAdmin ? (
+          // Authorized Admin Dashboard
+          <AdminDashboard
+            admin={verifiedAdmin}
+            onLogout={handleLogout}
+            isLoggingOut={isLoggingOut}
+          />
+        ) : (
+          // Admin Login Form
+          <div className="w-full max-w-md mx-auto flex flex-col items-center">
+            {/* Brand Logo & Presentation */}
+            <div className="text-center mb-6 sm:mb-8 select-none">
+              {/* Elegant Crest Icon */}
+              <div className="inline-flex items-center justify-center w-16 h-16 sm:w-20 sm:h-20 rounded-2xl bg-[#121212] border border-[#D4AF37]/40 shadow-xl mb-3 relative gold-glow">
+                <div className="absolute inset-1 rounded-xl border border-[#D4AF37]/20 border-dashed"></div>
+                <span className="font-['Cinzel'] text-2xl sm:text-3xl font-extrabold text-gold-gradient tracking-wider">
+                  FC
+                </span>
+              </div>
+
+              {/* Main Text Logo */}
+              <h1 className="font-['Cinzel'] text-2xl sm:text-3xl font-bold tracking-[0.2em] text-white">
+                FC.FOUNOUN
+              </h1>
+
+              {/* Brand Sub-title */}
+              <div className="flex items-center justify-center gap-2 mt-1">
+                <span className="h-px w-6 bg-gradient-to-r from-transparent to-[#D4AF37]/50"></span>
+                <p className="font-['Cairo'] text-xs sm:text-sm text-[#D4AF37] font-semibold tracking-wider">
+                  فنون للأحذية الفاخرة
+                </p>
+                <span className="h-px w-6 bg-gradient-to-l from-transparent to-[#D4AF37]/50"></span>
+              </div>
+            </div>
+
+            {/* Admin Login Form Component */}
+            <AdminLoginForm
+              onSuccess={(admin) => setVerifiedAdmin(admin)}
+              externalError={sessionError}
+              onClearExternalError={() => setSessionError(null)}
+            />
+          </div>
+        )}
+      </main>
+
+      {/* Bottom Footer */}
+      <footer className="relative z-10 w-full border-t border-white/5 bg-[#070707] py-4 px-4 safe-pb text-center text-xs text-gray-500">
+        <div className="max-w-4xl mx-auto flex flex-col sm:flex-row items-center justify-between gap-2 text-[11px]">
+          <p className="text-gray-400">
+            جميع الحقوق محفوظة © {new Date().getFullYear()} FC.FOUNOUN
+          </p>
+          <div className="flex items-center gap-1.5 text-[#D4AF37]/80">
+            <Sparkles className="w-3 h-3" />
+            <span>نظام الحماية والمصادقة المزدوجة (Auth + Firestore RBAC)</span>
+          </div>
+        </div>
+      </footer>
+    </div>
+  );
+}
