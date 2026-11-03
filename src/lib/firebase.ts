@@ -13,7 +13,7 @@ const rawApiKey = (import.meta.env.VITE_FIREBASE_API_KEY || '').trim();
 
 // Use a validly formatted fallback key if none is provided via env,
 // preventing Firebase Web SDK from throwing a synchronous fatal `auth/invalid-api-key` error on load.
-const activeApiKey = rawApiKey || 'AIzaSyB-FCFOUNOUN-PROD-AUTH-KEY-DEMO99';
+const activeApiKey = rawApiKey;
 
 const firebaseConfig = {
   apiKey: activeApiKey,
@@ -56,7 +56,7 @@ export const db: Firestore = dbInstance;
 
 // Check if a real custom API key is configured
 export const isFirebaseConfigured = (): boolean => {
-  return Boolean(rawApiKey && rawApiKey !== '' && !rawApiKey.includes('DEMO99'));
+  return Boolean(rawApiKey);
 };
 
 /**

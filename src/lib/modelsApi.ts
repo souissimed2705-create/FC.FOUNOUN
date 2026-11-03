@@ -6,14 +6,14 @@
  * (Create, Update, Delete) with Firebase ID Token authentication and RBAC.
  */
 
-import { auth } from './lib/firebase';
+import { auth } from './firebase';
 import type {
   CreateModelPayload,
   UpdateModelPayload,
   CreateModelResponse,
   UpdateModelResponse,
   DeleteModelResponse,
-} from './types/models';
+} from '../types/models';
 
 const WORKER_BASE_URL =
   (import.meta.env.VITE_WORKER_URL as string | undefined)?.replace(/\/$/, '') ||

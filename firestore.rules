@@ -24,13 +24,15 @@ service cloud.firestore {
     // Mutating operations (create, update, delete) are handled securely via Cloudflare Worker backend
     match /models/{modelId} {
       allow read: if true;
-      allow write: if isSuperAdmin();
+      // All model mutations go through the authenticated Cloudflare Worker.
+      allow write: if false;
     }
 
     // Model names reservation locks: Internal unique namespace index
     match /model_names/{nameHash} {
       allow read: if isAuthenticated();
-      allow write: if isSuperAdmin();
+      // Name locks are maintained atomically by the Cloudflare Worker only.
+      allow write: if false;
     }
   }
 }
