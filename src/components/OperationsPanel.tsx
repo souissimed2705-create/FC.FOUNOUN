@@ -24,6 +24,9 @@ export const OperationsPanel: React.FC<Props> = ({ initialSection, admin }) => {
   const [machineNumber, setMachineNumber] = useState<'1' | '2' | '3'>('1');
   const [shift, setShift] = useState<'day' | 'night'>('day');
   const [cycles, setCycles] = useState<MachineCycleRecord[]>([]);
+  const [cycleMachineFilter, setCycleMachineFilter] = useState('');
+  const [cycleShiftFilter, setCycleShiftFilter] = useState('');
+  const [cycleDateFilter, setCycleDateFilter] = useState('');
   const [selectedCyclePhoto, setSelectedCyclePhoto] = useState<{ id: string; photo: string } | null>(null);
   const [workerEdits, setWorkerEdits] = useState<Record<string, { name: string; phone: string; machineNumber: string; shift: 'day' | 'night' }>>({});
   const [pinId, setPinId] = useState('');
@@ -153,6 +156,12 @@ export const OperationsPanel: React.FC<Props> = ({ initialSection, admin }) => {
     { id: 'messages', label: 'المحادثة' },
   ];
 
+  const filteredCycles = cycles.filter(report =>
+    (!cycleMachineFilter || String(report.machineNumber) === cycleMachineFilter) &&
+    (!cycleShiftFilter || report.shift === cycleShiftFilter) &&
+    (!cycleDateFilter || report.date === cycleDateFilter)
+  );
+
   return <section className="w-full rounded-2xl border border-white/10 bg-[#111] p-5 space-y-4" dir="rtl">
     <div className="flex flex-wrap gap-2 mb-2">
       {tabs.map(tab => <button key={tab.id} className={'tab-button ' + (section === tab.id ? 'tab-active' : '')} onClick={() => setSection(tab.id)}>{tab.id === 'messages' && <MessageCircle className="w-4 h-4" />}{tab.label}</button>)}
@@ -229,8 +238,14 @@ export const OperationsPanel: React.FC<Props> = ({ initialSection, admin }) => {
     {section === 'cycles' && <div className="space-y-3">
       <div className="flex items-center gap-2"><Gauge className="h-5 w-5 text-[#D4AF37]" /><h3 className="font-bold text-[#F5D77F]">تقارير عدد دورات المكائن</h3></div>
       <p className="text-xs leading-6 text-gray-400">تُعرض تقارير كل مكينة ووردية بصورة مستقلة. لا يتم جمع دورات النهار مع الليل.</p>
-      {!cycles.length && <p className="rounded-xl border border-white/10 bg-[#080808] p-6 text-center text-sm text-gray-500">لا توجد تقارير دورات مسجلة.</p>}
-      {cycles.map(report => <article key={report.id} className="rounded-xl border border-white/10 bg-[#080808] p-3"><div className="flex flex-wrap items-center justify-between gap-2"><b>المكينة {report.machineNumber} · {report.shift === 'day' ? 'النهار' : 'الليل'}</b><strong className="text-[#F5D77F]">{report.count.toLocaleString('ar-TN')} دورة</strong></div><p className="mt-1 text-xs text-gray-400">{report.date} · {new Date(report.recordedAt).toLocaleString('ar-TN')} · {report.workerName}</p><p className="mt-1 text-xs text-gray-500">{report.hasPhoto ? <button className="secondary-button mt-2" onClick={async () => { try { const result = await getMachineCyclePhoto(report.id); setSelectedCyclePhoto(result.data); } catch (e) { setError(e instanceof Error ? e.message : 'تعذر عرض صورة العداد.'); } }}>عرض صورة العداد</button> : 'لا توجد صورة مرفقة'}</p></article>)}
+      <div className="grid grid-cols-1 gap-2 sm:grid-cols-3">
+        <select aria-label="تصفية حسب المكينة" className="field" value={cycleMachineFilter} onChange={e => setCycleMachineFilter(e.target.value)}><option value="">كل المكائن</option><option value="1">المكينة 1</option><option value="2">المكينة 2</option><option value="3">المكينة 3</option></select>
+        <select aria-label="تصفية حسب الوردية" className="field" value={cycleShiftFilter} onChange={e => setCycleShiftFilter(e.target.value)}><option value="">كل الورديات</option><option value="day">النهار</option><option value="night">الليل</option></select>
+        <input aria-label="تصفية حسب التاريخ" className="field" type="date" value={cycleDateFilter} onChange={e => setCycleDateFilter(e.target.value)} />
+      </div>
+      <p className="text-xs text-gray-500">عدد التقارير المعروضة: {filteredCycles.length}</p>
+      {!filteredCycles.length && <p className="rounded-xl border border-white/10 bg-[#080808] p-6 text-center text-sm text-gray-500">لا توجد تقارير تطابق عوامل التصفية.</p>}
+      {filteredCycles.map(report => <article key={report.id} className="rounded-xl border border-white/10 bg-[#080808] p-3"><div className="flex flex-wrap items-center justify-between gap-2"><b>المكينة {report.machineNumber} · {report.shift === 'day' ? 'النهار' : 'الليل'}</b><strong className="text-[#F5D77F]">{report.count.toLocaleString('ar-TN')} دورة</strong></div><p className="mt-1 text-xs text-gray-400">{report.date} · {new Date(report.recordedAt).toLocaleString('ar-TN')} · {report.workerName}</p><p className="mt-1 text-xs text-gray-500">{report.hasPhoto ? <button className="secondary-button mt-2" onClick={async () => { try { const result = await getMachineCyclePhoto(report.id); setSelectedCyclePhoto(result.data); } catch (e) { setError(e instanceof Error ? e.message : 'تعذر عرض صورة العداد.'); } }}>عرض صورة العداد</button> : 'لا توجد صورة مرفقة'}</p></article>)}
     </div>}
 
     {selectedCyclePhoto && <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/90 p-4" role="dialog" aria-modal="true" aria-label="صورة عداد المكينة" onClick={() => setSelectedCyclePhoto(null)}><div className="max-h-[90vh] max-w-3xl rounded-xl border border-[#D4AF37]/40 bg-[#111] p-3" onClick={e => e.stopPropagation()}><div className="mb-2 flex justify-between"><b className="text-[#F5D77F]">صورة عداد المكينة</b><button className="secondary-button" onClick={() => setSelectedCyclePhoto(null)}>إغلاق</button></div><img src={selectedCyclePhoto.photo} alt="صورة عداد المكينة" className="max-h-[78vh] w-auto rounded-lg object-contain" /></div></div>}
