@@ -268,7 +268,7 @@ async function dispatchManagementRoute(request, route, callerUid, callerRole, pr
 }
 
 const RESOURCE_FIELDS = {
-  workers: ['name', 'phone', 'email', 'status', 'notes', 'role'],
+  workers: ['name', 'phone', 'email', 'status', 'notes'],
   tasks: ['title', 'description', 'status', 'priority', 'assignedWorkerId', 'assignedWorkerName', 'modelId', 'modelName', 'modelCategory', 'targetQuantity', 'completedQuantity', 'dueDate'],
 };
 
@@ -299,6 +299,17 @@ function validateResourcePayload(payload, resource, isCreate) {
   for (const [key, value] of Object.entries(payload)) {
     if (!['string', 'number', 'boolean'].includes(typeof value) || (typeof value === 'string' && value.length > 2000)) {
       throw createHttpError(`قيمة الحقل ${key} غير صالحة`, 400, 'invalid_field');
+    }
+  }
+  if (resource === 'workers') {
+    if (payload.name !== undefined && (typeof payload.name !== 'string' || !payload.name.trim())) {
+      throw createHttpError('اسم العامل لا يمكن أن يكون فارغاً', 400, 'invalid_worker_name');
+    }
+    if (payload.status !== undefined && !['active', 'inactive'].includes(payload.status)) {
+      throw createHttpError('حالة العامل يجب أن تكون active أو inactive فقط', 400, 'invalid_worker_status');
+    }
+    if (payload.phone !== undefined && typeof payload.phone !== 'string') {
+      throw createHttpError('رقم هاتف العامل غير صالح', 400, 'invalid_worker_phone');
     }
   }
 }
@@ -370,11 +381,28 @@ async function handleUpdateTaskCollection(request, callerUid, projectId, accessT
   return handleUpdateResource(syntheticRequest, 'tasks', id, callerUid, projectId, accessToken, corsHeaders);
 }
 
+export function buildWorkerFreezeUpdate(current, timestamp) {
+  return { ...current, status: 'inactive', frozenAt: timestamp, updatedAt: timestamp };
+}
+
 async function handleDeleteResource(id, resource, projectId, accessToken, corsHeaders) {
   const current = await getFirestoreDoc(projectId, accessToken, `${resource}/${id}`);
   if (!current) throw createHttpError('المورد المطلوب غير موجود', 404, 'resource_not_found');
-  await commitFirestoreTransaction(projectId, accessToken, null, [{ delete: `projects/${projectId}/databases/(default)/documents/${resource}/${id}`, currentDocument: { updateTime: current.updateTime } }]);
-  return jsonResponse({ success: true, id }, 200, corsHeaders);
+  // Worker records are never permanently deleted: the legacy DELETE route freezes the account.
+  if (resource === 'workers') {
+    const existing = convertFromFirestoreFields(current.fields || {});
+    const timestamp = new Date().toISOString();
+    const frozen = buildWorkerFreezeUpdate(existing, timestamp);
+    await commitFirestoreTransaction(projectId, accessToken, null, [{
+      update: {
+        name: `projects/${projectId}/databases/(default)/documents/workers/${id}`,
+        fields: convertToFirestoreFields(frozen)
+      },
+      currentDocument: { updateTime: current.updateTime }
+    }]);
+    return jsonResponse({ success: true, id, status: 'inactive', frozen: true }, 200, corsHeaders);
+  }
+  throw createHttpError('الحذف الدائم غير مسموح لهذا المورد', 405, 'permanent_delete_forbidden');
 }
 
 async function handleWorkerLogin(request, env, projectId, accessToken, corsHeaders) {
