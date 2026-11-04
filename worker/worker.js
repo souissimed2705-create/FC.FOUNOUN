@@ -645,6 +645,9 @@ export function assertResponsibleWorkerFieldsAllowed(role, payload) {
  */
 export function assertWorkerManagementPermission(role, method, action = null) {
   if (role === 'super_admin') return true;
+  if (action === 'pin') {
+    throw createHttpError('تعيين أو تغيير رموز PIN من صلاحيات المشرف العام فقط', 403, 'worker_pin_super_admin_only');
+  }
   if (role === 'admin' && ['GET', 'POST', 'PUT', 'DELETE'].includes(method)) return true;
   if (role === 'responsible' && ['GET', 'POST', 'PUT', 'DELETE'].includes(method)) return true;
   throw createHttpError('لا تملك صلاحية تنفيذ هذه العملية على حسابات مشرفي العمال', 403, 'worker_management_forbidden');
