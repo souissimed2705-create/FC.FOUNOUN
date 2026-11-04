@@ -431,6 +431,9 @@ async function handleCreateResource(request, resource, callerUid, projectId, acc
 async function handleUpdateResource(request, resource, id, callerUid, projectId, accessToken, corsHeaders, callerRole = null) {
   const payload = await parseJsonBody(request);
   validateResourcePayload(payload, resource, false);
+  if (resource === 'workers' && callerRole === 'admin' && Object.prototype.hasOwnProperty.call(payload || {}, 'status')) {
+    throw createHttpError('المدير العام لا يملك صلاحية تجميد أو تعطيل حساب مشرف العمال', 403, 'manager_worker_freeze_forbidden');
+  }
   if (resource === 'workers' && callerRole === 'responsible' && Object.keys(payload || {}).some(key => key !== 'name')) {
     throw createHttpError('المسؤول يستطيع تعديل اسم مشرف العمال فقط؛ لا يمكنه تغيير المكينة أو الوردية أو حالة الحساب', 403, 'responsible_worker_edit_limited');
   }
