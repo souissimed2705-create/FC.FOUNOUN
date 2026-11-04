@@ -243,7 +243,7 @@ async function dispatchManagementRoute(request, route, callerUid, projectId, acc
 
 const RESOURCE_FIELDS = {
   workers: ['name', 'phone', 'email', 'status', 'notes', 'role'],
-  tasks: ['title', 'description', 'status', 'priority', 'assignedWorkerId', 'dueAt'],
+  tasks: ['title', 'description', 'status', 'priority', 'assignedWorkerId', 'assignedWorkerName', 'modelId', 'modelName', 'targetQuantity', 'completedQuantity', 'dueDate'],
 };
 
 function validateResourcePayload(payload, resource, isCreate) {
@@ -290,7 +290,8 @@ async function handleCreateResource(request, resource, callerUid, projectId, acc
   validateResourcePayload(payload, resource, true);
   const id = `${resource === 'workers' ? 'wkr' : 'tsk'}_${crypto.randomUUID().replace(/-/g, '')}`;
   const now = new Date().toISOString();
-  const record = { id, ...payload, createdBy: callerUid, createdAt: now, updatedAt: now };
+  const defaults = resource === 'workers' ? { status: 'active' } : { status: 'open', completedQuantity: 0 };
+  const record = { id, ...defaults, ...payload, createdBy: callerUid, createdAt: now, updatedAt: now };
   const writes = [{ update: { name: `projects/${projectId}/databases/(default)/documents/${resource}/${id}`, fields: convertToFirestoreFields(record) }, currentDocument: { exists: false } }];
   await commitFirestoreTransaction(projectId, accessToken, null, writes);
   return jsonResponse({ success: true, [resource === 'workers' ? 'worker' : 'task']: record }, 201, corsHeaders);
@@ -327,8 +328,8 @@ async function handleDeleteResource(id, resource, projectId, accessToken, corsHe
 
 async function handleSetWorkerPin(request, workerId, callerUid, projectId, accessToken, corsHeaders) {
   const payload = await parseJsonBody(request);
-  if (!payload || typeof payload.pin !== 'string' || !/^\d{4,12}$/.test(payload.pin)) {
-    throw createHttpError('PIN يجب أن يكون من 4 إلى 12 رقماً', 400, 'invalid_pin');
+  if (!payload || typeof payload.pin !== 'string' || !/^\d{6}$/.test(payload.pin)) {
+    throw createHttpError('PIN يجب أن يتكون من 6 أرقام بالضبط', 400, 'invalid_pin');
   }
   const worker = await getFirestoreDoc(projectId, accessToken, `workers/${workerId}`);
   if (!worker) throw createHttpError('العامل المطلوب غير موجود', 404, 'worker_not_found');
@@ -341,13 +342,28 @@ async function handleSetWorkerPin(request, workerId, callerUid, projectId, acces
 
 async function handleTaskProgress(request, taskId, callerUid, projectId, accessToken, corsHeaders) {
   const payload = await parseJsonBody(request);
-  if (!payload || !Number.isInteger(payload.progress) || payload.progress < 0 || payload.progress > 100) {
-    throw createHttpError('progress يجب أن يكون عدداً صحيحاً بين 0 و100', 400, 'invalid_progress');
+  if (!payload || !Number.isSafeInteger(payload.quantity) || payload.quantity < 1 || payload.quantity > 1000000) {
+    throw createHttpError('quantity يجب أن يكون عدداً صحيحاً موجباً', 400, 'invalid_quantity');
+  }
+  if (payload.note !== undefined && (typeof payload.note !== 'string' || payload.note.length > 2000)) {
+    throw createHttpError('ملاحظة الإنجاز غير صالحة', 400, 'invalid_note');
   }
   const currentDoc = await getFirestoreDoc(projectId, accessToken, `tasks/${taskId}`);
   if (!currentDoc) throw createHttpError('المهمة المطلوبة غير موجودة', 404, 'task_not_found');
   const current = convertFromFirestoreFields(currentDoc.fields || {});
-  const record = { ...current, progress: payload.progress, updatedBy: callerUid, updatedAt: new Date().toISOString() };
+  const targetQuantity = Number(current.targetQuantity || 0);
+  const completedQuantity = Number(current.completedQuantity || 0) + payload.quantity;
+  if (!Number.isSafeInteger(targetQuantity) || targetQuantity < 1 || completedQuantity > targetQuantity) {
+    throw createHttpError('الكمية المنجزة تتجاوز الكمية المطلوبة أو أن بيانات المهمة غير صالحة', 409, 'quantity_exceeds_target');
+  }
+  const record = {
+    ...current,
+    completedQuantity,
+    status: completedQuantity === targetQuantity ? 'completed' : 'in_progress',
+    ...(payload.note ? { lastProgressNote: payload.note } : {}),
+    updatedBy: callerUid,
+    updatedAt: new Date().toISOString()
+  };
   await commitFirestoreTransaction(projectId, accessToken, null, [{ update: { name: `projects/${projectId}/databases/(default)/documents/tasks/${taskId}`, fields: convertToFirestoreFields(record) }, currentDocument: { updateTime: currentDoc.updateTime } }]);
   return jsonResponse({ success: true, task: sanitizeResourceOutput(record, 'tasks') }, 200, corsHeaders);
 }
