@@ -31,3 +31,16 @@ export function queueMutation(path: string, init: RequestInit) { const queue = r
 function readQueue(): QueuedMutation[] { try { return JSON.parse(localStorage.getItem(QUEUE_KEY) || '[]'); } catch { return []; } }
 export function queuedMutationCount() { return readQueue().length; }
 export async function flushQueuedMutations() { const queue = readQueue(); if (!queue.length || !navigator.onLine) return 0; let flushed = 0; for (const item of queue) { try { await request(item.path, item.init); flushed++; } catch { break; } } if (flushed) localStorage.setItem(QUEUE_KEY, JSON.stringify(queue.slice(flushed))); return flushed; }
+
+export async function workerLogin(workerId: string, pin: string): Promise<{ customToken: string; worker: { id: string; name: string } }> {
+  const response = await fetch(`${BASE}/api/worker-auth/login`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ workerId, pin }),
+  });
+  const body = await response.json().catch(() => null);
+  if (!response.ok || !body?.success || !body?.customToken) throw new Error(body?.error || 'تعذر تسجيل دخول العامل.');
+  return { customToken: body.customToken, worker: body.worker };
+}
+export const listMyTasks = () => request<OperationsResponse<TaskRecord[]>>('/api/worker/tasks');
+export const recordMyProgress = (id: string, payload: ProgressPayload) => request<OperationsResponse<TaskRecord>>(`/api/worker/tasks/${encodeURIComponent(id)}/progress`, { method: 'POST', body: JSON.stringify(payload) });
