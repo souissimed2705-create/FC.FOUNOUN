@@ -349,7 +349,7 @@ async function handleListResource(request, resource, projectId, accessToken, cor
   const pageSize = Number.isInteger(requested) ? Math.min(Math.max(requested, 1), 100) : 50;
   const result = await listFirestoreDocs(projectId, accessToken, resource, pageSize);
   const records = result.documents.map((doc) => sanitizeResourceOutput(convertFromFirestoreFields(doc.fields || {}), resource));
-  const visibleRecords = resource === 'workers' && callerRole === 'admin'
+  const visibleRecords = resource === 'workers' && callerRole !== 'super_admin'
     ? records.map(worker => ({ id: worker.id, name: worker.name, status: worker.status, machineNumber: worker.machineNumber, shift: worker.shift }))
     : records;
   return jsonResponse({ success: true, [resource]: visibleRecords, nextPageToken: result.nextPageToken }, 200, corsHeaders);
@@ -654,7 +654,8 @@ async function handleWorkerCycles(request, workerId, projectId, accessToken, cor
     const rows = await listFirestoreDocs(projectId, accessToken, 'machine_cycles', 100);
     const reports = rows.documents.map(doc => convertFromFirestoreFields(doc.fields || {}))
       .filter(item => item.workerId === workerId)
-      .sort((a, b) => String(b.recordedAt || '').localeCompare(String(a.recordedAt || '')));
+      .sort((a, b) => String(b.recordedAt || '').localeCompare(String(a.recordedAt || '')))
+      .map(({ photo, ...report }) => ({ ...report, hasPhoto: Boolean(photo) }));
     return jsonResponse({ success: true, data: reports }, 200, corsHeaders);
   }
   const payload = await parseJsonBody(request, 700 * 1024);
