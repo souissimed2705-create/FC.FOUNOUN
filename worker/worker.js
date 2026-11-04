@@ -72,10 +72,14 @@ export default {
 
     // 2. Strict API Path Routing
     const managementRoute = parseManagementRoute(cleanPath, request.method);
+    const workerLoginRoute = cleanPath === '/api/worker-auth/login' && request.method === 'POST';
+    const workerTasksRoute = cleanPath === '/api/worker/tasks' && request.method === 'GET';
+    const workerProgressMatch = cleanPath.match(/^\\/api\\/worker\\/tasks\\/([^/]+)\\/progress$/);
+    const workerProgressRoute = workerProgressMatch && request.method === 'POST';
     if (managementRoute?.error) {
       return jsonResponse({ success: false, error: managementRoute.error.message, code: managementRoute.error.code }, 400, corsHeaders);
     }
-    if (!managementRoute && !cleanPath.startsWith('/api/models')) {
+    if (!managementRoute && !workerLoginRoute && !workerTasksRoute && !workerProgressRoute && !cleanPath.startsWith('/api/models')) {
       return jsonResponse({ success: false, error: 'المسار المطلوب غير موجود', code: 'not_found' }, 404, corsHeaders);
     }
 
@@ -136,6 +140,13 @@ export default {
 
     try {
       // 3. Authenticate Firebase ID Token
+      const serviceAccount = parseServiceAccount(env);
+      const projectId = env.PROJECT_ID || serviceAccount.project_id || 'fc-founoun';
+      if (workerLoginRoute) {
+        const saAccessToken = await getServiceAccountAccessToken(serviceAccount);
+        return await handleWorkerLogin(request, env, projectId, saAccessToken, corsHeaders);
+      }
+
       const authHeader = request.headers.get('Authorization') || '';
       if (!authHeader.startsWith('Bearer ')) {
         return jsonResponse(
@@ -146,14 +157,22 @@ export default {
       }
 
       const idToken = authHeader.slice(7).trim();
-      const serviceAccount = parseServiceAccount(env);
-      const projectId = env.PROJECT_ID || serviceAccount.project_id || 'fc-founoun';
-
       const decodedToken = await verifyFirebaseIdToken(idToken, projectId);
       const callerUid = decodedToken.sub;
 
-      // 4. Verify Super Admin RBAC via Firestore
       const saAccessToken = await getServiceAccountAccessToken(serviceAccount);
+      if (workerTasksRoute || workerProgressRoute) {
+        if (decodedToken.role !== 'worker' || decodedToken.workerId !== callerUid) {
+          throw createHttpError('هذه الخدمة مخصصة لحساب العامل فقط', 403, 'worker_only');
+        }
+        if (workerTasksRoute) return await handleWorkerListTasks(callerUid, projectId, saAccessToken, corsHeaders);
+        const taskId = safeDecodeUriSegment(workerProgressMatch[1]);
+        return await handleWorkerTaskProgress(request, taskId, callerUid, projectId, saAccessToken, corsHeaders);
+      }
+      if (decodedToken.role === 'worker') {
+        throw createHttpError('حساب العامل لا يملك صلاحيات الإدارة', 403, 'worker_admin_forbidden');
+      }
+      // 4. Verify Super Admin RBAC via Firestore
       await verifySuperAdminRole(callerUid, projectId, saAccessToken);
 
       // 5. Dispatch Route Handlers
@@ -340,6 +359,83 @@ async function handleDeleteResource(id, resource, projectId, accessToken, corsHe
   if (!current) throw createHttpError('المورد المطلوب غير موجود', 404, 'resource_not_found');
   await commitFirestoreTransaction(projectId, accessToken, null, [{ delete: `projects/${projectId}/databases/(default)/documents/${resource}/${id}`, currentDocument: { updateTime: current.updateTime } }]);
   return jsonResponse({ success: true, id }, 200, corsHeaders);
+}
+
+async function handleWorkerLogin(request, env, projectId, accessToken, corsHeaders) {
+  const payload = await parseJsonBody(request);
+  const workerId = typeof payload?.workerId === 'string' ? payload.workerId.trim() : '';
+  const pin = typeof payload?.pin === 'string' ? payload.pin : '';
+  if (!RESOURCE_ID_REGEX.test(workerId) || !/^\\d{6}$/.test(pin)) {
+    throw createHttpError('أدخل رمز العامل وPIN من 6 أرقام', 400, 'invalid_worker_credentials');
+  }
+  const workerDoc = await getFirestoreDoc(projectId, accessToken, `workers/${workerId}`);
+  const pinDoc = await getFirestoreDoc(projectId, accessToken, `worker_pins/${workerId}`);
+  if (!workerDoc || !pinDoc) throw createHttpError('بيانات العامل أو PIN غير صحيحة', 401, 'invalid_worker_credentials');
+  const worker = convertFromFirestoreFields(workerDoc.fields || {});
+  const pinRecord = convertFromFirestoreFields(pinDoc.fields || {});
+  if (worker.status !== 'active') throw createHttpError('حساب العامل غير نشط', 403, 'worker_inactive');
+
+  const attemptsPath = `worker_auth_attempts/${workerId}`;
+  const attemptsDoc = await getFirestoreDoc(projectId, accessToken, attemptsPath);
+  const attempts = attemptsDoc ? convertFromFirestoreFields(attemptsDoc.fields || {}) : {};
+  const now = Date.now();
+  if (Number(attempts.lockedUntil || 0) > now) {
+    throw createHttpError('تم إيقاف محاولة الدخول مؤقتاً. حاول بعد 15 دقيقة.', 429, 'worker_login_locked');
+  }
+
+  const suppliedHash = await computeWebCryptoSha256(`${pinRecord.pin_salt}:${pin}`);
+  if (suppliedHash !== pinRecord.pin_hash) {
+    const count = Number(attempts.count || 0) + 1;
+    const lockedUntil = count >= 5 ? now + 15 * 60 * 1000 : 0;
+    const attemptRecord = { workerId, count: lockedUntil ? 0 : count, lockedUntil, updatedAt: new Date().toISOString() };
+    const write = { update: { name: `projects/${projectId}/databases/(default)/documents/${attemptsPath}`, fields: convertToFirestoreFields(attemptRecord) } };
+    if (attemptsDoc?.updateTime) write.currentDocument = { updateTime: attemptsDoc.updateTime };
+    else write.currentDocument = { exists: false };
+    await commitFirestoreTransaction(projectId, accessToken, null, [write]);
+    throw createHttpError('بيانات العامل أو PIN غير صحيحة', 401, 'invalid_worker_credentials');
+  }
+
+  const resetWrite = { update: { name: `projects/${projectId}/databases/(default)/documents/${attemptsPath}`, fields: convertToFirestoreFields({ workerId, count: 0, lockedUntil: 0, updatedAt: new Date().toISOString() }) } };
+  if (attemptsDoc?.updateTime) resetWrite.currentDocument = { updateTime: attemptsDoc.updateTime };
+  else resetWrite.currentDocument = { exists: false };
+  await commitFirestoreTransaction(projectId, accessToken, null, [resetWrite]);
+
+  const customToken = await createFirebaseCustomToken(env, workerId, worker.name);
+  return jsonResponse({ success: true, customToken, worker: { id: workerId, name: worker.name } }, 200, corsHeaders);
+}
+
+async function createFirebaseCustomToken(env, uid, workerName) {
+  const sa = parseServiceAccount(env);
+  const nowSec = Math.floor(Date.now() / 1000);
+  const header = bytesToBase64Url(new TextEncoder().encode(JSON.stringify({ alg: 'RS256', typ: 'JWT' })));
+  const payload = bytesToBase64Url(new TextEncoder().encode(JSON.stringify({
+    iss: sa.client_email, sub: sa.client_email,
+    aud: 'https://identitytoolkit.googleapis.com/google.identity.identitytoolkit.v1.IdentityToolkit',
+    iat: nowSec, exp: nowSec + 3600, uid,
+    claims: { role: 'worker', workerId: uid, workerName: String(workerName || 'العامل').slice(0, 80) }
+  })));
+  const signingInput = `${header}.${payload}`;
+  const key = await importPkcs8PrivateKey(sa.private_key);
+  const signature = await crypto.subtle.sign('RSASSA-PKCS1-v1_5', key, new TextEncoder().encode(signingInput));
+  return `${signingInput}.${bytesToBase64Url(new Uint8Array(signature))}`;
+}
+
+async function handleWorkerListTasks(workerId, projectId, accessToken, corsHeaders) {
+  const result = await listFirestoreDocs(projectId, accessToken, 'tasks', 100);
+  const tasks = result.documents
+    .map(doc => convertFromFirestoreFields(doc.fields || {}))
+    .filter(task => task.assignedWorkerId === workerId)
+    .map(task => sanitizeResourceOutput(task, 'tasks'));
+  return jsonResponse({ success: true, tasks }, 200, corsHeaders);
+}
+
+async function handleWorkerTaskProgress(request, taskId, workerId, projectId, accessToken, corsHeaders) {
+  const taskDoc = await getFirestoreDoc(projectId, accessToken, `tasks/${taskId}`);
+  if (!taskDoc) throw createHttpError('المهمة غير موجودة', 404, 'task_not_found');
+  const task = convertFromFirestoreFields(taskDoc.fields || {});
+  if (task.assignedWorkerId !== workerId) throw createHttpError('لا يمكنك تحديث مهمة غير مسندة إليك', 403, 'task_not_assigned');
+  if (task.status === 'cancelled' || task.status === 'completed') throw createHttpError('هذه المهمة مغلقة', 409, 'task_closed');
+  return handleTaskProgress(request, taskId, workerId, projectId, accessToken, corsHeaders);
 }
 
 async function handleSetWorkerPin(request, workerId, callerUid, projectId, accessToken, corsHeaders) {
