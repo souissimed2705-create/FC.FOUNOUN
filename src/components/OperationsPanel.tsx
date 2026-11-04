@@ -105,7 +105,7 @@ export const OperationsPanel: React.FC<Props> = ({ initialSection, admin }) => {
       setError('اختر المودال والعامل وأدخل الكمية المطلوبة بصورة صحيحة.');
       return;
     }
-    const payload = { title: 'إنتاج مودال ' + model.name, description: description.trim(), modelId: model.id, modelName: model.name, assignedWorkerId, targetQuantity: qty };
+    const payload = { title: 'إنتاج مودال ' + model.name, description: description.trim(), modelId: model.id, modelName: model.name, modelCategory: model.category, assignedWorkerId, targetQuantity: qty };
     void runMutation(() => createTask(payload), { path: '/api/tasks', init: { method: 'POST', body: JSON.stringify(payload) } });
     setModelId(''); setTargetQuantity(''); setDescription('');
   };
