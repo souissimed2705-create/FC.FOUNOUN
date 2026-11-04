@@ -48,7 +48,6 @@ export const OperationsPanel: React.FC<Props> = ({ initialSection, admin }) => {
       setTasks(t.data || []);
       setModels(m.models || []);
       setCycles(c.data || []);
-      setSelectedWorkerId(current => current || w.data?.[0]?.id || '');
     } catch (e) {
       setError(e instanceof Error ? e.message : 'تعذر تحميل البيانات.');
     }
