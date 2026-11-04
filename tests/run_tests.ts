@@ -28,6 +28,7 @@ import {
   safeDecodeUriSegment,
   buildWorkerFreezeUpdate,
   assertWorkerManagementPermission,
+  assertResponsibleWorkerFieldsAllowed,
   assertSuperAdminManagementAccountsPermission,
   assertManagementAccountUpdateAllowed,
   buildResponsibleShiftReservationWrite,
@@ -427,6 +428,22 @@ export async function runAllTests() {
   assert(assertWorkerManagementPermission('admin', 'GET') === true, 'السماح للمدير العام بقراءة قائمة مشرفي العمال');
   assert(assertWorkerManagementPermission('responsible', 'GET') === true, 'السماح للمسؤول بعرض قائمة مشرفي العمال');
   assert(assertWorkerManagementPermission('responsible', 'POST') === true, 'السماح للمسؤول بإضافة مشرفي العمال');
+  assert(assertResponsibleWorkerFieldsAllowed('responsible', { name: 'عامل', machineNumber: 1, shift: 'day' }) === true,
+    'السماح للمسؤول بإنشاء مشرف عامل بالاسم والمكينة والوردية');
+  assert(assertResponsibleWorkerFieldsAllowed('admin', { name: 'عامل', phone: '123', notes: 'ملاحظات' }) === true,
+    'عدم تقييد صلاحيات المدير العام في بيانات العامل');
+  assertThrowsWithCode(
+    () => assertResponsibleWorkerFieldsAllowed('responsible', { name: 'عامل', machineNumber: 1, shift: 'day', phone: '123' }),
+    'responsible_worker_field_forbidden',
+    'منع المسؤول من إدخال بيانات اتصال العامل',
+    403
+  );
+  assertThrowsWithCode(
+    () => assertResponsibleWorkerFieldsAllowed('responsible', { name: 'عامل', machineNumber: 1, shift: 'day', notes: 'ملاحظات داخلية' }),
+    'responsible_worker_field_forbidden',
+    'منع المسؤول من إدخال ملاحظات خارج صلاحياته',
+    403
+  );
   assert(assertWorkerManagementPermission('responsible', 'PUT') === true, 'السماح للمسؤول بتعديل بيانات وتعيين مشرف العمال');
   assert(assertWorkerManagementPermission('responsible', 'PUT', 'pin') === true, 'السماح للمسؤول بتغيير كود دخول مشرف العمال');
   assert(assertWorkerManagementPermission('responsible', 'DELETE') === true, 'السماح للمسؤول بتجميد حساب مشرف العمال دون حذفه نهائياً');
