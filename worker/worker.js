@@ -76,10 +76,12 @@ export default {
     const workerTasksRoute = cleanPath === '/api/worker/tasks' && request.method === 'GET';
     const workerProgressMatch = cleanPath.match(/^\/api\/worker\/tasks\/([^/]+)\/progress$/);
     const workerProgressRoute = workerProgressMatch && request.method === 'POST';
+    const workerMessagesRoute = cleanPath === '/api/worker/messages' && ['GET', 'POST'].includes(request.method);
+    const adminMessagesRoute = cleanPath === '/api/messages' && ['GET', 'POST'].includes(request.method);
     if (managementRoute?.error) {
       return jsonResponse({ success: false, error: managementRoute.error.message, code: managementRoute.error.code }, 400, corsHeaders);
     }
-    if (!managementRoute && !workerLoginRoute && !workerTasksRoute && !workerProgressRoute && !cleanPath.startsWith('/api/models')) {
+    if (!managementRoute && !workerLoginRoute && !workerTasksRoute && !workerProgressRoute && !workerMessagesRoute && !adminMessagesRoute && !cleanPath.startsWith('/api/models')) {
       return jsonResponse({ success: false, error: 'المسار المطلوب غير موجود', code: 'not_found' }, 404, corsHeaders);
     }
 
@@ -161,11 +163,12 @@ export default {
       const callerUid = decodedToken.sub;
 
       const saAccessToken = await getServiceAccountAccessToken(serviceAccount);
-      if (workerTasksRoute || workerProgressRoute) {
+      if (workerTasksRoute || workerProgressRoute || workerMessagesRoute) {
         if (decodedToken.role !== 'worker' || decodedToken.workerId !== callerUid) {
           throw createHttpError('هذه الخدمة مخصصة لحساب العامل فقط', 403, 'worker_only');
         }
         if (workerTasksRoute) return await handleWorkerListTasks(callerUid, projectId, saAccessToken, corsHeaders);
+        if (workerMessagesRoute) return await handleWorkerMessages(request, callerUid, projectId, saAccessToken, corsHeaders);
         const taskId = safeDecodeUriSegment(workerProgressMatch[1]);
         return await handleWorkerTaskProgress(request, taskId, callerUid, projectId, saAccessToken, corsHeaders);
       }
@@ -173,7 +176,11 @@ export default {
         throw createHttpError('حساب العامل لا يملك صلاحيات الإدارة', 403, 'worker_admin_forbidden');
       }
       // 4. Verify Super Admin RBAC via Firestore
-      await verifyManagementRole(callerUid, projectId, saAccessToken);
+      const callerRole = await verifyManagementRole(callerUid, projectId, saAccessToken);
+      if (managementRoute?.resource === 'workers' && (request.method !== 'GET' || managementRoute.action === 'pin') && callerRole !== 'super_admin') {
+        throw createHttpError('إدارة حسابات العمال وإثباتاتهم ورموزهم من صلاحيات المشرف فقط', 403, 'super_admin_only_worker_management');
+      }
+      if (adminMessagesRoute) return await handleManagementMessages(request, callerUid, callerRole, projectId, saAccessToken, corsHeaders);
 
       // 5. Dispatch Route Handlers
       if (managementRoute) {
@@ -420,6 +427,69 @@ async function createFirebaseCustomToken(env, uid, workerName) {
   const key = await importPkcs8PrivateKey(sa.private_key);
   const signature = await crypto.subtle.sign('RSASSA-PKCS1-v1_5', key, new TextEncoder().encode(signingInput));
   return `${signingInput}.${bytesToBase64Url(new Uint8Array(signature))}`;
+}
+
+async function readConversation(workerId, projectId, accessToken) {
+  const result = await listFirestoreDocs(projectId, accessToken, 'messages', 100);
+  return result.documents
+    .map(doc => convertFromFirestoreFields(doc.fields || {}))
+    .filter(message => message.workerId === workerId)
+    .sort((a, b) => String(a.createdAt || '').localeCompare(String(b.createdAt || '')));
+}
+
+async function saveConversationMessage(workerId, senderUid, senderRole, senderName, text, projectId, accessToken) {
+  const cleanText = typeof text === 'string' ? text.trim() : '';
+  if (!cleanText || cleanText.length > 2000) {
+    throw createHttpError('اكتب رسالة لا تتجاوز 2000 حرف', 400, 'invalid_message');
+  }
+  const workerDoc = await getFirestoreDoc(projectId, accessToken, `workers/${workerId}`);
+  if (!workerDoc || convertFromFirestoreFields(workerDoc.fields || {}).status !== 'active') {
+    throw createHttpError('العامل غير موجود أو حسابه غير نشط', 404, 'worker_not_found');
+  }
+  const id = `msg_${crypto.randomUUID().replace(/-/g, '')}`;
+  const message = {
+    id, workerId, senderUid, senderRole, senderName: String(senderName || 'مستخدم').slice(0, 100),
+    text: cleanText, createdAt: new Date().toISOString()
+  };
+  const path = `messages/${id}`;
+  await commitFirestoreTransaction(projectId, accessToken, null, [{
+    update: { name: `projects/${projectId}/databases/(default)/documents/${path}`, fields: convertToFirestoreFields(message) },
+    currentDocument: { exists: false }
+  }]);
+  return message;
+}
+
+async function handleManagementMessages(request, callerUid, callerRole, projectId, accessToken, corsHeaders) {
+  if (request.method === 'GET') {
+    const workerId = new URL(request.url).searchParams.get('workerId') || '';
+    if (!RESOURCE_ID_REGEX.test(workerId)) throw createHttpError('اختر عاملاً صحيحاً لعرض المحادثة', 400, 'missing_worker');
+    const workerDoc = await getFirestoreDoc(projectId, accessToken, `workers/${workerId}`);
+    if (!workerDoc) throw createHttpError('العامل غير موجود', 404, 'worker_not_found');
+    const messages = await readConversation(workerId, projectId, accessToken);
+    return jsonResponse({ success: true, data: messages }, 200, corsHeaders);
+  }
+  const payload = await parseJsonBody(request);
+  const workerId = typeof payload?.workerId === 'string' ? payload.workerId.trim() : '';
+  if (!RESOURCE_ID_REGEX.test(workerId)) throw createHttpError('اختر عاملاً صحيحاً لإرسال الرسالة', 400, 'missing_worker');
+  const userDoc = await getFirestoreDoc(projectId, accessToken, `users/${callerUid}`);
+  const user = userDoc ? convertFromFirestoreFields(userDoc.fields || {}) : {};
+  const message = await saveConversationMessage(workerId, callerUid, callerRole, user.displayName || user.email || 'المسؤول', payload.text, projectId, accessToken);
+  return jsonResponse({ success: true, data: message }, 201, corsHeaders);
+}
+
+async function handleWorkerMessages(request, workerId, projectId, accessToken, corsHeaders) {
+  const workerDoc = await getFirestoreDoc(projectId, accessToken, `workers/${workerId}`);
+  if (!workerDoc || convertFromFirestoreFields(workerDoc.fields || {}).status !== 'active') {
+    throw createHttpError('حساب العامل غير نشط', 403, 'worker_inactive');
+  }
+  if (request.method === 'GET') {
+    const messages = await readConversation(workerId, projectId, accessToken);
+    return jsonResponse({ success: true, data: messages }, 200, corsHeaders);
+  }
+  const payload = await parseJsonBody(request);
+  const worker = convertFromFirestoreFields(workerDoc.fields || {});
+  const message = await saveConversationMessage(workerId, workerId, 'worker', worker.name || 'العامل', payload.text, projectId, accessToken);
+  return jsonResponse({ success: true, data: message }, 201, corsHeaders);
 }
 
 async function handleWorkerListTasks(workerId, projectId, accessToken, corsHeaders) {
@@ -1513,6 +1583,7 @@ async function verifyManagementRole(uid, projectId, accessToken) {
   if (!['admin', 'super_admin'].includes(fields.role) || fields.status !== 'active') {
     throw createHttpError('يلزم حساب مسؤول أو مشرف نشط لتنفيذ هذه العملية', 403, 'forbidden');
   }
+  return fields.role;
 }
 
 async function beginFirestoreTransaction(projectId, accessToken) {
