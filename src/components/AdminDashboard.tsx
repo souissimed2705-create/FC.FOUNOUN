@@ -70,7 +70,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ admin, onLogout,
           <span className="flex h-14 w-14 shrink-0 items-center justify-center rounded-xl bg-[#D4AF37]/15 text-[#F5D77F]"><Crown className="h-7 w-7" /></span>
           <span><strong className="block text-base text-[#F5D77F]">مركز المشرف</strong><small className="mt-1 block text-xs leading-5 text-gray-400">إدارة العمال ورموز PIN والتجميد وإعادة التفعيل وإعدادات الإشراف.</small></span>
         </button>}
-        {!isSupervisor && canManageWorkers && <button onClick={() => go('workers')} className="group flex min-h-28 items-center gap-4 rounded-2xl border border-[#D4AF37]/35 bg-[#111] p-5 text-right transition hover:border-[#D4AF37] hover:bg-[#19160E]"><span className="flex h-14 w-14 shrink-0 items-center justify-center rounded-xl bg-[#D4AF37]/10 text-[#F5D77F]"><Users className="h-7 w-7" /></span><span><strong className="block text-base text-white">إدارة مشرفي العمال</strong><small className="mt-1 block text-xs leading-5 text-gray-400">تحديث الأسماء وأكواد الدخول وتوزيع المكائن حسب صلاحيتك.</small></span></button>}
+        {!isSupervisor && canManageWorkers && <button onClick={() => go('workers')} className="group flex min-h-28 items-center gap-4 rounded-2xl border border-[#D4AF37]/35 bg-[#111] p-5 text-right transition hover:border-[#D4AF37] hover:bg-[#19160E]"><span className="flex h-14 w-14 shrink-0 items-center justify-center rounded-xl bg-[#D4AF37]/10 text-[#F5D77F]"><Users className="h-7 w-7" /></span><span><strong className="block text-base text-white">إدارة مشرفي العمال</strong><small className="mt-1 block text-xs leading-5 text-gray-400">تحديث الأسماء وتوزيع المكائن والورديات وتجميد الحسابات حسب صلاحيتك.</small></span></button>}
       </div>
     </>}
 
