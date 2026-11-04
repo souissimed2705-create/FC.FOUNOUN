@@ -28,7 +28,11 @@ export const updateTask = (id: string, payload: Partial<TaskPayload & Pick<TaskR
 export const recordProgress = (id: string, payload: ProgressPayload) => request<OperationsResponse<TaskRecord>>(`/api/tasks/${encodeURIComponent(id)}/progress`, { method: 'POST', body: JSON.stringify(payload) });
 export const listConversation = (workerId: string) => request<OperationsResponse<ChatMessage[]>>(`/api/messages?workerId=${encodeURIComponent(workerId)}`);
 export const sendManagementMessage = (workerId: string, text: string) => request<OperationsResponse<ChatMessage>>('/api/messages', { method: 'POST', body: JSON.stringify({ workerId, text }) });
-export const listMachineCycles = () => request<OperationsResponse<MachineCycleRecord[]>>('/api/cycles?pageSize=100');
+export const listMachineCycles = (pageToken?: string | null) => {
+  const params = new URLSearchParams({ pageSize: '100' });
+  if (pageToken) params.set('pageToken', pageToken);
+  return request<OperationsResponse<MachineCycleRecord[]> & { nextPageToken?: string | null }>(`/api/cycles?${params.toString()}`);
+};
 export const getMachineCyclePhoto = (id: string) => request<OperationsResponse<{ id: string; photo: string }>>(`/api/cycles/${encodeURIComponent(id)}/photo`);
 export const listManagementAccounts = () => request<OperationsResponse<ManagementAccountRecord[]>>('/api/management-accounts');
 export const createManagementAccount = (payload: { name: string; role: 'admin' | 'responsible'; code: string; shift?: 'day' | 'night' }) => request<OperationsResponse<ManagementAccountRecord>>('/api/management-accounts', { method: 'POST', body: JSON.stringify(payload) });
