@@ -39,7 +39,7 @@ export const listContacts = () => request<OperationsResponse<ContactRecord[]>>('
 export const listDirectMessages = (otherUid: string) => request<OperationsResponse<ChatMessage[]>>(`/api/direct-messages/${encodeURIComponent(otherUid)}`);
 export const sendDirectMessage = (otherUid: string, text: string) => request<OperationsResponse<ChatMessage>>(`/api/direct-messages/${encodeURIComponent(otherUid)}`, { method: 'POST', body: JSON.stringify({ text }) });
 export const listMyMachineCycles = () => request<OperationsResponse<MachineCycleRecord[]>>('/api/worker/cycles');
-export const submitMachineCycle = (count: number, photo: string) => request<OperationsResponse<MachineCycleRecord>>('/api/worker/cycles', { method: 'POST', body: JSON.stringify({ count, photo }) });
+export const submitMachineCycle = (count: number, photo: string, recordedAt: string) => request<OperationsResponse<MachineCycleRecord>>('/api/worker/cycles', { method: 'POST', body: JSON.stringify({ count, photo, recordedAt }) });
 
 type QueuedMutation = { id: string; path: string; init: RequestInit; createdAt: string };
 export function queueMutation(path: string, init: RequestInit) { if (!auth.currentUser) throw new Error('لا يمكن حفظ عملية دون اتصال قبل تسجيل الدخول.'); const queue = readQueue(); queue.push({ id: crypto.randomUUID(), path, init, createdAt: new Date().toISOString() }); localStorage.setItem(currentQueueKey(), JSON.stringify(queue)); }
