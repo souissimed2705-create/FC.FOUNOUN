@@ -38,11 +38,11 @@ function readQueue(): QueuedMutation[] { try { return JSON.parse(localStorage.ge
 export function queuedMutationCount() { return readQueue().length; }
 export async function flushQueuedMutations() { const queue = readQueue(); if (!queue.length || !navigator.onLine) return 0; let flushed = 0; for (const item of queue) { try { await request(item.path, item.init); flushed++; } catch { break; } } if (flushed) localStorage.setItem(QUEUE_KEY, JSON.stringify(queue.slice(flushed))); return flushed; }
 
-export async function workerLogin(workerId: string, pin: string): Promise<{ customToken: string; worker: { id: string; name: string } }> {
+export async function workerLogin(name: string, pin: string): Promise<{ customToken: string; worker: { id: string; name: string } }> {
   const response = await fetch(`${BASE}/api/worker-auth/login`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ workerId, pin }),
+    body: JSON.stringify({ name, pin }),
   });
   const body = await response.json().catch(() => null);
   if (!response.ok || !body?.success || !body?.customToken) throw new Error(body?.error || 'تعذر تسجيل دخول العامل.');
