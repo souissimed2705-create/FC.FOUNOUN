@@ -79,7 +79,7 @@ export const PrivateMessagesPanel: React.FC = () => {
       {messages.map(message => {
         const mine = message.senderUid === auth.currentUser?.uid;
         return <div key={message.id} className={'max-w-[88%] rounded-xl p-3 ' + (mine ? 'mr-auto bg-[#3A2E12]' : 'ml-auto bg-white/10')}>
-          <div className="mb-1 text-[11px] text-[#F5D77F]">{mine ? 'أنت' : message.senderName} · {new Date(message.createdAt).toLocaleString('ar-TN')}</div>
+          <div className="mb-1 text-[11px] text-[#F5D77F]">{mine ? 'أنت' : message.senderName} · {new Date(message.createdAt).toLocaleString('ar-TN', { timeZone: 'Africa/Tunis' })}</div>
           <p className="break-words whitespace-pre-wrap text-sm">{message.text}</p>
         </div>;
       })}
