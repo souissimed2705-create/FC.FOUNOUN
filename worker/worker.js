@@ -499,11 +499,16 @@ async function handleDeleteResource(id, resource, projectId, accessToken, corsHe
 
 async function handleWorkerLogin(request, env, projectId, accessToken, corsHeaders) {
   const payload = await parseJsonBody(request);
-  const workerId = typeof payload?.workerId === 'string' ? payload.workerId.trim() : '';
+  const workerName = typeof payload?.name === 'string' ? payload.name.trim() : '';
   const pin = typeof payload?.pin === 'string' ? payload.pin : '';
-  if (!RESOURCE_ID_REGEX.test(workerId) || !/^\d{6}$/.test(pin)) {
-    throw createHttpError('أدخل رمز العامل وPIN من 6 أرقام', 400, 'invalid_worker_credentials');
+  if (!workerName || workerName.length > 100 || !/^\d{6}$/.test(pin)) {
+    throw createHttpError('أدخل اسم مشرف العمال والكود السري المكوّن من 6 أرقام', 400, 'invalid_worker_credentials');
   }
+  const workerList = await listFirestoreDocs(projectId, accessToken, 'workers', 100);
+  const matchingWorkers = workerList.documents.map(doc => ({ doc, worker: convertFromFirestoreFields(doc.fields || {}) }))
+    .filter(item => item.worker.status === 'active' && String(item.worker.name || '').trim().toLocaleLowerCase() === workerName.toLocaleLowerCase());
+  if (matchingWorkers.length !== 1) throw createHttpError('الاسم أو الكود السري غير صحيح، أو أن الاسم غير فريد', 401, 'invalid_worker_credentials');
+  const workerId = matchingWorkers[0].worker.id;
   const workerDoc = await getFirestoreDoc(projectId, accessToken, `workers/${workerId}`);
   const pinDoc = await getFirestoreDoc(projectId, accessToken, `worker_pins/${workerId}`);
   if (!workerDoc || !pinDoc) throw createHttpError('بيانات العامل أو PIN غير صحيحة', 401, 'invalid_worker_credentials');
