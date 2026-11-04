@@ -458,7 +458,18 @@ async function handleSetWorkerPin(request, workerId, callerUid, projectId, acces
   const salt = bytesToBase64Url(crypto.getRandomValues(new Uint8Array(16)));
   const pinHash = await computePinPbkdf2(salt, payload.pin);
   const pinRecord = { workerId, pin_hash: pinHash, pin_salt: salt, pin_algo: 'pbkdf2-sha256-v1', updatedBy: callerUid, updatedAt: new Date().toISOString() };
-  await commitFirestoreTransaction(projectId, accessToken, null, [{ update: { name: `projects/${projectId}/databases/(default)/documents/worker_pins/${workerId}`, fields: convertToFirestoreFields(pinRecord) } }]);
+  const pinPath = `worker_pins/${workerId}`;
+  const existingPinDoc = await getFirestoreDoc(projectId, accessToken, pinPath);
+  const pinWrite = {
+    update: {
+      name: `projects/${projectId}/databases/(default)/documents/${pinPath}`,
+      fields: convertToFirestoreFields(pinRecord)
+    },
+    currentDocument: existingPinDoc?.updateTime
+      ? { updateTime: existingPinDoc.updateTime }
+      : { exists: false }
+  };
+  await commitFirestoreTransaction(projectId, accessToken, null, [pinWrite]);
   return jsonResponse({ success: true, workerId, message: 'تم حفظ PIN بشكل hash فقط' }, 200, corsHeaders);
 }
 
