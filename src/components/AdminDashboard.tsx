@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { ArrowRight, ClipboardList, Crown, LogOut, Package, ShieldCheck, Users, UserCog } from 'lucide-react';
+import { Home, ClipboardList, Crown, LogOut, Package, ShieldCheck, Users, UserCog } from 'lucide-react';
 import { UserProfile } from '../lib/firebase';
 import { ModelsPanel } from './ModelsPanel';
 import { OperationsPanel } from './OperationsPanel';
@@ -37,7 +37,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ admin, onLogout,
           </div>
         </div>
         <div className="flex items-center gap-2">
-          {page !== 'home' && <button onClick={backHome} className="secondary-button"><ArrowRight className="w-4 h-4" /> الرئيسية</button>}
+          {page !== 'home' && <button type="button" onClick={backHome} aria-label="العودة إلى واجهة الاستقبال" title="العودة إلى واجهة الاستقبال" className="flex h-10 w-10 items-center justify-center rounded-full border border-[#D4AF37]/50 bg-[#D4AF37]/10 text-[#F5D77F] transition hover:bg-[#D4AF37]/20 focus:outline-none focus:ring-2 focus:ring-[#D4AF37]"><Home className="h-5 w-5" /></button>}
           <button onClick={onLogout} disabled={isLoggingOut} className="danger-button"><LogOut className="w-4 h-4" /> {isLoggingOut ? 'جاري الخروج...' : 'تسجيل الخروج'}</button>
         </div>
       </div>
