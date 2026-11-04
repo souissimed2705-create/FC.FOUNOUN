@@ -18,7 +18,7 @@ export default defineConfig(() => {
         manifest: {
           id: '/',
           name: 'FONOUN CHAUSSURES – فنون للأحذية',
-          short_name: 'FONOUN CHAUSSURES',
+          short_name: 'FONOUN',
           description: 'تطبيق فنون للأحذية لإدارة الموديلات ومهام الإنتاج وتقارير المكائن والمراسلات الخاصة.',
           theme_color: '#0A0A0A',
           background_color: '#0A0A0A',
