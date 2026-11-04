@@ -876,17 +876,31 @@ async function buildDirectConversationId(uidA, uidB) {
   return `conv_${bytesToBase64Url(new Uint8Array(digest))}`;
 }
 
+export function firestoreDocumentId(documentName) {
+  if (typeof documentName !== 'string') return '';
+  const parts = documentName.split('/').filter(Boolean);
+  return parts.length ? parts[parts.length - 1] : '';
+}
+
 async function handleListContacts(callerUid, projectId, accessToken, corsHeaders) {
   const [usersResult, workersResult] = await Promise.all([
     listFirestoreDocs(projectId, accessToken, 'users', 100),
     listFirestoreDocs(projectId, accessToken, 'workers', 100)
   ]);
-  const users = usersResult.documents.map(doc => convertFromFirestoreFields(doc.fields || {}))
-    .filter(user => user.status === 'active' && ['super_admin', 'admin', 'responsible'].includes(user.role) && (user.uid || user.id) !== callerUid)
-    .map(user => ({ uid: user.uid || user.id, name: String(user.displayName || user.name || 'مستخدم').slice(0, 80), role: user.role }));
-  const workers = workersResult.documents.map(doc => convertFromFirestoreFields(doc.fields || {}))
-    .filter(worker => worker.status === 'active' && worker.id !== callerUid)
-    .map(worker => ({ uid: worker.id, name: String(worker.name || 'مشرف العمال').slice(0, 80), role: 'worker' }));
+  // Firestore REST documents always carry their document path, even when
+  // older profile records do not contain a duplicated uid/id field.
+  const users = usersResult.documents.map(doc => {
+    const user = convertFromFirestoreFields(doc.fields || {});
+    return { ...user, uid: user.uid || user.id || firestoreDocumentId(doc.name) };
+  })
+    .filter(user => user.uid && user.uid !== callerUid && user.status === 'active' && ['super_admin', 'admin', 'responsible'].includes(user.role))
+    .map(user => ({ uid: user.uid, name: String(user.displayName || user.name || 'مستخدم').slice(0, 80), role: user.role }));
+  const workers = workersResult.documents.map(doc => {
+    const worker = convertFromFirestoreFields(doc.fields || {});
+    return { ...worker, uid: worker.id || worker.workerId || firestoreDocumentId(doc.name) };
+  })
+    .filter(worker => worker.uid && worker.uid !== callerUid && worker.status === 'active')
+    .map(worker => ({ uid: worker.uid, name: String(worker.name || 'مشرف العمال').slice(0, 80), role: 'worker' }));
   const contacts = [...users, ...workers].sort((a, b) => a.name.localeCompare(b.name, 'ar'));
   return jsonResponse({ success: true, data: contacts }, 200, corsHeaders);
 }
