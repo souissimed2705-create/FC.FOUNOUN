@@ -217,6 +217,9 @@ export default {
       if (managementRoute?.resource === 'workers') {
         assertWorkerManagementPermission(callerRole, request.method, managementRoute.action);
       }
+      if (managementRoute?.resource === 'tasks') {
+        assertTaskManagementPermission(callerRole);
+      }
       
       if (managementAccountsRoute || managementAccountActionRoute) {
         assertSuperAdminManagementAccountsPermission(callerRole);
@@ -559,6 +562,11 @@ export function assertWorkerManagementPermission(role, method, action = null) {
 }
 
 /** @param {string} role */
+export function assertTaskManagementPermission(role) {
+  if (role === 'super_admin' || role === 'admin') return true;
+  throw createHttpError('إدارة مهام الإنتاج من صلاحيات المدير العام والمشرف العام فقط', 403, 'task_management_forbidden');
+}
+
 export function assertSuperAdminManagementAccountsPermission(role) {
   if (role === 'super_admin') return true;
   throw createHttpError('إدارة حسابات المديرين والمسؤولين من صلاحيات المشرف العام فقط', 403, 'super_admin_only_management_accounts');
