@@ -76,19 +76,21 @@ export default {
     const workerTasksRoute = cleanPath === '/api/worker/tasks' && request.method === 'GET';
     const workerProgressMatch = cleanPath.match(/^\/api\/worker\/tasks\/([^/]+)\/progress$/);
     const workerProgressRoute = workerProgressMatch && request.method === 'POST';
+    const workerTaskStatusMatch = cleanPath.match(/^\/api\/worker\/tasks\/([^/]+)\/status$/);
+    const workerTaskStatusRoute = workerTaskStatusMatch && request.method === 'PUT';
     const workerMessagesRoute = cleanPath === '/api/worker/messages' && ['GET', 'POST'].includes(request.method);
     const adminMessagesRoute = cleanPath === '/api/messages' && ['GET', 'POST'].includes(request.method);
     if (managementRoute?.error) {
       return jsonResponse({ success: false, error: managementRoute.error.message, code: managementRoute.error.code }, 400, corsHeaders);
     }
-    if (!managementRoute && !workerLoginRoute && !workerTasksRoute && !workerProgressRoute && !workerMessagesRoute && !adminMessagesRoute && !cleanPath.startsWith('/api/models')) {
+    if (!managementRoute && !workerLoginRoute && !workerTasksRoute && !workerProgressRoute && !workerTaskStatusRoute && !workerMessagesRoute && !adminMessagesRoute && !cleanPath.startsWith('/api/models')) {
       return jsonResponse({ success: false, error: 'المسار المطلوب غير موجود', code: 'not_found' }, 404, corsHeaders);
     }
 
     let modelIdParam = null;
     const modelsPrefix = '/api/models';
 
-    if (managementRoute || workerLoginRoute || workerTasksRoute || workerProgressRoute || workerMessagesRoute || adminMessagesRoute) {
+    if (managementRoute || workerLoginRoute || workerTasksRoute || workerProgressRoute || workerTaskStatusRoute || workerMessagesRoute || adminMessagesRoute) {
       // Validated API routes are dispatched after authentication.
     } else if (cleanPath === modelsPrefix) {
       if (request.method !== 'GET' && request.method !== 'POST') {
@@ -163,12 +165,13 @@ export default {
       const callerUid = decodedToken.sub;
 
       const saAccessToken = await getServiceAccountAccessToken(serviceAccount);
-      if (workerTasksRoute || workerProgressRoute || workerMessagesRoute) {
+      if (workerTasksRoute || workerProgressRoute || workerTaskStatusRoute || workerMessagesRoute) {
         if (decodedToken.role !== 'worker' || decodedToken.workerId !== callerUid) {
           throw createHttpError('هذه الخدمة مخصصة لحساب العامل فقط', 403, 'worker_only');
         }
         if (workerTasksRoute) return await handleWorkerListTasks(callerUid, projectId, saAccessToken, corsHeaders);
         if (workerMessagesRoute) return await handleWorkerMessages(request, callerUid, projectId, saAccessToken, corsHeaders);
+        if (workerTaskStatusRoute) return await handleWorkerTaskStatus(request, safeDecodeUriSegment(workerTaskStatusMatch[1]), callerUid, projectId, saAccessToken, corsHeaders);
         const taskId = safeDecodeUriSegment(workerProgressMatch[1]);
         return await handleWorkerTaskProgress(request, taskId, callerUid, projectId, saAccessToken, corsHeaders);
       }
@@ -568,6 +571,36 @@ async function handleWorkerListTasks(workerId, projectId, accessToken, corsHeade
     .filter(task => task.assignedWorkerId === workerId)
     .map(task => sanitizeResourceOutput(task, 'tasks'));
   return jsonResponse({ success: true, tasks }, 200, corsHeaders);
+}
+
+async function handleWorkerTaskStatus(request, taskId, workerId, projectId, accessToken, corsHeaders) {
+  const workerDoc = await getFirestoreDoc(projectId, accessToken, `workers/${workerId}`);
+  if (!workerDoc || convertFromFirestoreFields(workerDoc.fields || {}).status !== 'active') {
+    throw createHttpError('حساب العامل غير نشط', 403, 'worker_inactive');
+  }
+  const payload = await parseJsonBody(request);
+  if (!payload || !['pending', 'in_progress'].includes(payload.status)) {
+    throw createHttpError('يمكن للعامل تعليق المهمة أو استئنافها فقط', 400, 'invalid_task_status');
+  }
+  const taskDoc = await getFirestoreDoc(projectId, accessToken, `tasks/${taskId}`);
+  if (!taskDoc) throw createHttpError('المهمة المطلوبة غير موجودة', 404, 'task_not_found');
+  const task = convertFromFirestoreFields(taskDoc.fields || {});
+  if (task.assignedWorkerId !== workerId) {
+    throw createHttpError('لا يمكنك تغيير حالة مهمة غير مسندة إليك', 403, 'task_not_assigned');
+  }
+  if (['completed', 'cancelled'].includes(task.status) || Number(task.completedQuantity || 0) >= Number(task.targetQuantity || 0)) {
+    throw createHttpError('لا يمكن تغيير حالة مهمة مكتملة أو ملغاة', 409, 'task_not_changeable');
+  }
+  const now = new Date().toISOString();
+  const record = { ...task, status: payload.status, updatedBy: workerId, updatedAt: now };
+  await commitFirestoreTransaction(projectId, accessToken, null, [{
+    update: {
+      name: `projects/${projectId}/databases/(default)/documents/tasks/${taskId}`,
+      fields: convertToFirestoreFields(record)
+    },
+    currentDocument: { updateTime: taskDoc.updateTime }
+  }]);
+  return jsonResponse({ success: true, task: sanitizeResourceOutput(record, 'tasks') }, 200, corsHeaders);
 }
 
 async function handleWorkerTaskProgress(request, taskId, workerId, projectId, accessToken, corsHeaders) {
