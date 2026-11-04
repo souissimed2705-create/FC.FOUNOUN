@@ -2,7 +2,8 @@ import { auth } from './firebase';
 import type { OperationsResponse, ProgressPayload, TaskPayload, TaskRecord, WorkerPayload, WorkerRecord, ChatMessage, MachineCycleRecord, ManagementAccountRecord, ContactRecord } from '../types/operations';
 
 const BASE = ((import.meta.env.VITE_WORKER_URL as string | undefined) || 'https://shiny-bird-56fc.souissimed2705.workers.dev').replace(/\/$/, '');
-const QUEUE_KEY = 'fc-founoun-offline-operations-v1';
+const QUEUE_KEY_PREFIX = 'fc-founoun-offline-operations-v2';
+function currentQueueKey() { return `${QUEUE_KEY_PREFIX}:${auth.currentUser?.uid || 'anonymous'}`; }
 
 async function token() { if (!auth.currentUser) throw new Error('يجب تسجيل الدخول أولاً.'); return auth.currentUser.getIdToken(false); }
 async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
@@ -41,10 +42,10 @@ export const listMyMachineCycles = () => request<OperationsResponse<MachineCycle
 export const submitMachineCycle = (count: number, photo: string) => request<OperationsResponse<MachineCycleRecord>>('/api/worker/cycles', { method: 'POST', body: JSON.stringify({ count, photo }) });
 
 type QueuedMutation = { id: string; path: string; init: RequestInit; createdAt: string };
-export function queueMutation(path: string, init: RequestInit) { const queue = readQueue(); queue.push({ id: crypto.randomUUID(), path, init, createdAt: new Date().toISOString() }); localStorage.setItem(QUEUE_KEY, JSON.stringify(queue)); }
-function readQueue(): QueuedMutation[] { try { return JSON.parse(localStorage.getItem(QUEUE_KEY) || '[]'); } catch { return []; } }
+export function queueMutation(path: string, init: RequestInit) { if (!auth.currentUser) throw new Error('لا يمكن حفظ عملية دون اتصال قبل تسجيل الدخول.'); const queue = readQueue(); queue.push({ id: crypto.randomUUID(), path, init, createdAt: new Date().toISOString() }); localStorage.setItem(currentQueueKey(), JSON.stringify(queue)); }
+function readQueue(): QueuedMutation[] { try { return JSON.parse(localStorage.getItem(currentQueueKey()) || '[]'); } catch { return []; } }
 export function queuedMutationCount() { return readQueue().length; }
-export async function flushQueuedMutations() { const queue = readQueue(); if (!queue.length || !navigator.onLine) return 0; let flushed = 0; for (const item of queue) { try { await request(item.path, item.init); flushed++; } catch { break; } } if (flushed) localStorage.setItem(QUEUE_KEY, JSON.stringify(queue.slice(flushed))); return flushed; }
+export async function flushQueuedMutations() { const queue = readQueue(); if (!queue.length || !navigator.onLine) return 0; let flushed = 0; for (const item of queue) { try { await request(item.path, item.init); flushed++; } catch { break; } } if (flushed) localStorage.setItem(currentQueueKey(), JSON.stringify(queue.slice(flushed))); return flushed; }
 
 export async function managementLogin(name: string, code: string, role: 'admin' | 'responsible'): Promise<{ customToken: string; user: { uid: string; displayName: string; role: string } }> {
   const response = await fetch(`${BASE}/api/management-auth/login`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name, code, role }) });
