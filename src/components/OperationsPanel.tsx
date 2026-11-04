@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { createTask, createWorker, deleteWorker, flushQueuedMutations, listConversation, listTasks, listWorkers, queuedMutationCount, recordProgress, sendManagementMessage, setWorkerPin } from '../lib/operationsApi';
+import { createTask, createWorker, flushQueuedMutations, listConversation, listTasks, listWorkers, queuedMutationCount, recordProgress, sendManagementMessage, setWorkerPin, updateWorker } from '../lib/operationsApi';
 import { listShoeModels } from '../lib/modelsApi';
 import type { ShoeModel } from '../types/models';
 import type { ChatMessage, TaskRecord, WorkerRecord } from '../types/operations';
@@ -16,6 +16,7 @@ export const OperationsPanel: React.FC<Props> = ({ initialSection, admin }) => {
   const [models, setModels] = useState<ShoeModel[]>([]);
   const [name, setName] = useState('');
   const [phone, setPhone] = useState('');
+  const [workerEdits, setWorkerEdits] = useState<Record<string, { name: string; phone: string }>>({});
   const [pinId, setPinId] = useState('');
   const [pin, setPin] = useState('');
   const [modelId, setModelId] = useState('');
@@ -37,6 +38,7 @@ export const OperationsPanel: React.FC<Props> = ({ initialSection, admin }) => {
     try {
       const [w, t, m] = await Promise.all([listWorkers(), listTasks(), listShoeModels({ pageSize: 100 })]);
       setWorkers(w.data || []);
+      setWorkerEdits(current => Object.fromEntries((w.data || []).map(worker => [worker.id, current[worker.id] || { name: worker.name, phone: worker.phone || '' }])));
       setTasks(t.data || []);
       setModels(m.models || []);
       setSelectedWorkerId(current => current || w.data?.[0]?.id || '');
@@ -152,15 +154,17 @@ export const OperationsPanel: React.FC<Props> = ({ initialSection, admin }) => {
         <button className="gold-button">إضافة عامل</button>
       </form>
       <div className="space-y-2">{workers.map(w => <div key={w.id} className="flex flex-wrap items-center gap-2 rounded-xl border border-white/10 bg-[#0A0A0A] p-3">
-        <span className="font-bold flex-1">{w.name}</span>
+        <input className="field min-w-0 flex-1" aria-label="اسم العامل" value={workerEdits[w.id]?.name ?? w.name} onChange={e => setWorkerEdits(current => ({ ...current, [w.id]: { name: e.target.value, phone: current[w.id]?.phone ?? w.phone ?? '' } }))} />
+        <input className="field w-32" aria-label="هاتف العامل" value={workerEdits[w.id]?.phone ?? w.phone ?? ''} onChange={e => setWorkerEdits(current => ({ ...current, [w.id]: { name: current[w.id]?.name ?? w.name, phone: e.target.value } }))} />
         <span className="text-xs text-[#F5D77F] font-mono">الرمز: {w.id}</span>
-        <span className="text-xs text-gray-400">{w.phone || 'بدون هاتف'} · {w.status}</span>
+        <span className="text-xs text-gray-400">{w.status}</span>
+        <button className="secondary-button" onClick={() => void runMutation(() => updateWorker(w.id, workerEdits[w.id] || { name: w.name, phone: w.phone || '' }))}>حفظ البيانات</button>
         <input className="field w-28" inputMode="numeric" maxLength={6} placeholder="PIN جديد" value={pinId === w.id ? pin : ''} onChange={e => { setPinId(w.id); setPin(e.target.value.replace(/\D/g, '')); }} />
         <button className="secondary-button" onClick={() => {
           if (pinId !== w.id || !/^\d{6}$/.test(pin)) { setError('PIN يجب أن يتكون من 6 أرقام بالضبط.'); return; }
           void runMutation(() => setWorkerPin(w.id, pin)); setPin(''); setPinId('');
         }}>حفظ PIN</button>
-        <button className="danger-button" onClick={() => void runMutation(() => deleteWorker(w.id))}>تعطيل / حذف السجل</button>
+        <button className={w.status === 'active' ? 'danger-button' : 'secondary-button'} onClick={() => void runMutation(() => updateWorker(w.id, { status: w.status === 'active' ? 'inactive' : 'active' }))}>{w.status === 'active' ? 'تجميد العامل' : 'إعادة التفعيل'}</button>
       </div>)}</div>
     </div>}
 
