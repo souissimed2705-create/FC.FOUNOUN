@@ -22,7 +22,7 @@ export const ManagementAccountsPanel: React.FC = () => {
   useEffect(() => { void refresh(); }, []);
   const create = async (event: React.FormEvent) => {
     event.preventDefault();
-    if (!name.trim() || !/^\\d{6}$/.test(code)) { setError('أدخل الاسم وكوداً سرياً من 6 أرقام.'); return; }
+    if (!name.trim() || !/^\d{6}$/.test(code)) { setError('أدخل الاسم وكوداً سرياً من 6 أرقام.'); return; }
     setBusy(true); setError(''); setNotice('');
     try {
       await createManagementAccount({ name: name.trim(), role, code, ...(role === 'responsible' ? { shift } : {}) });
@@ -40,7 +40,7 @@ export const ManagementAccountsPanel: React.FC = () => {
   };
   const saveCode = async (account: ManagementAccountRecord) => {
     const next = edits[account.uid]?.code || '';
-    if (!/^\\d{6}$/.test(next)) { setError('الكود السري يجب أن يتكون من 6 أرقام.'); return; }
+    if (!/^\d{6}$/.test(next)) { setError('الكود السري يجب أن يتكون من 6 أرقام.'); return; }
     setBusy(true); setError(''); setNotice('');
     try { await setManagementCode(account.uid, next); setEdits(current => ({ ...current, [account.uid]: { ...current[account.uid], code: '' } })); setNotice('تم تغيير الكود السري.'); }
     catch (err) { setError(err instanceof Error ? err.message : 'تعذر تغيير الكود.'); }
