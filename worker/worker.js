@@ -461,6 +461,7 @@ async function handleUpdateResource(request, resource, id, callerUid, projectId,
   }
 
   if (resource === 'tasks') {
+    assertTaskUpdateStatusAllowed(current.status, changes.status);
     if (Object.prototype.hasOwnProperty.call(changes, 'completedQuantity')) {
       throw createHttpError('لا يمكن تعديل الكمية المنجزة مباشرة؛ تُسجّل عبر سجل الإنجاز فقط', 400, 'completed_quantity_read_only');
     }
@@ -545,6 +546,16 @@ async function handleUpdateTaskCollection(request, callerUid, projectId, accessT
 }
 
 /** @param {string} role @param {string} method @param {string | null} [action=null] */
+export function assertTaskUpdateStatusAllowed(currentStatus, requestedStatus) {
+  if (['completed', 'cancelled'].includes(currentStatus)) {
+    throw createHttpError('المهمة المكتملة أو الملغاة مغلقة ولا تقبل تعديلات أخرى', 409, 'task_not_changeable');
+  }
+  if (requestedStatus !== undefined && !['open', 'in_progress', 'pending', 'cancelled'].includes(requestedStatus)) {
+    throw createHttpError('حالة المهمة غير صالحة؛ الإكمال لا يتم إلا عبر سجل الإنجاز', 400, 'invalid_task_status');
+  }
+  return true;
+}
+
 export function assertTaskCreationFieldsAllowed(payload) {
   if (Object.prototype.hasOwnProperty.call(payload || {}, 'completedQuantity')) {
     throw createHttpError('الكمية المنجزة تبدأ من صفر وتُسجّل عبر سجل الإنجاز فقط', 400, 'completed_quantity_read_only');
