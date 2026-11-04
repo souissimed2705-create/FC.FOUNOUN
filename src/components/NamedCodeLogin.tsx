@@ -12,7 +12,7 @@ export const NamedCodeLogin: React.FC<Props> = ({ role, title }) => {
   const [error, setError] = useState('');
   const submit = async (event: React.FormEvent) => {
     event.preventDefault();
-    if (!name.trim() || !/^\\d{6}$/.test(code)) {
+    if (!name.trim() || !/^\d{6}$/.test(code)) {
       setError('أدخل الاسم والكود السري المكوّن من 6 أرقام.');
       return;
     }
