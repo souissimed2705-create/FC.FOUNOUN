@@ -26,6 +26,7 @@ import {
   verifyTokenClaims,
   validateGoogleJwk,
   safeDecodeUriSegment,
+  buildWorkerFreezeUpdate,
 } from '../worker/worker.js';
 
 export async function runAllTests() {
@@ -314,6 +315,14 @@ export async function runAllTests() {
     malformedStatus = err.status;
   }
   assert(malformedCaught && malformedStatus === 400, 'إرجاع رمز الحالة 400 (Bad Request) بدلاً من 500 عند وجود معرّف مشوّه في المسار');
+
+  // 9. Worker account freeze is reversible; the record is retained, never hard-deleted.
+  console.log('\n9. اختبارات تجميد حساب العامل دون حذفه:');
+  const originalWorker = { id: 'wkr_test_001', name: 'عامل اختبار', status: 'active', phone: '20000000' };
+  const frozenWorker = buildWorkerFreezeUpdate(originalWorker, '2026-11-04T10:00:00.000Z');
+  assert(frozenWorker.status === 'inactive', 'تحويل حالة العامل إلى inactive عند التجميد');
+  assert(frozenWorker.id === originalWorker.id && frozenWorker.name === originalWorker.name, 'الاحتفاظ بسجل العامل وبياناته دون حذف');
+  assert(frozenWorker.frozenAt === '2026-11-04T10:00:00.000Z' && frozenWorker.updatedAt === frozenWorker.frozenAt, 'تسجيل وقت التجميد والتحديث');
 
   console.log('\n====================================================');
   console.log(`إجمالي الاختبارات: ${passed + failed} | نجح: ${passed} | فشل: ${failed}`);
