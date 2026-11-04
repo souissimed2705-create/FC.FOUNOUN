@@ -61,11 +61,11 @@ export const ManagementAccountsPanel: React.FC = () => {
     {error && <p role="alert" className="rounded-lg bg-red-950/40 p-3 text-sm text-red-200">{error}</p>}
     {notice && <p className="rounded-lg bg-emerald-950/30 p-3 text-sm text-emerald-200">{notice}</p>}
     <form onSubmit={create} className="grid grid-cols-1 gap-2 rounded-xl border border-white/10 bg-[#080808] p-3 sm:grid-cols-2">
-      <input className="field" placeholder="اسم الحساب" value={name} onChange={e => setName(e.target.value)} disabled={busy} />
-      <select className="field" value={role} onChange={e => setRole(e.target.value as 'admin' | 'responsible')} disabled={busy}><option value="admin">مدير عام</option><option value="responsible">مسؤول</option></select>
-      {role === 'responsible' && <select className="field" value={shift} onChange={e => setShift(e.target.value as 'day' | 'night')} disabled={busy}><option value="day">مسؤول الوردية النهارية</option><option value="night">مسؤول الوردية الليلية</option></select>}
-      <input className="field text-center tracking-[0.3em]" inputMode="numeric" type="password" maxLength={6} placeholder="كود سري من 6 أرقام" value={code} onChange={e => setCode(e.target.value.replace(/\D/g, '').slice(0, 6))} disabled={busy} />
-      <button className="gold-button sm:col-span-2" disabled={busy}>{busy ? 'جارٍ الحفظ...' : 'إنشاء الحساب'}</button>
+      <label className="block text-xs text-gray-300">اسم المدير أو المسؤول<input className="field mt-1 w-full" placeholder="اكتب الاسم" value={name} onChange={e => setName(e.target.value)} disabled={busy} /></label>
+      <label className="block text-xs text-gray-300">نوع الحساب<select className="field mt-1 w-full" value={role} onChange={e => setRole(e.target.value as 'admin' | 'responsible')} disabled={busy}><option value="admin">مدير عام</option><option value="responsible">مسؤول</option></select></label>
+      {role === 'responsible' && <label className="block text-xs text-gray-300">الوردية<select className="field mt-1 w-full" value={shift} onChange={e => setShift(e.target.value as 'day' | 'night')} disabled={busy}><option value="day">مسؤول الوردية النهارية</option><option value="night">مسؤول الوردية الليلية</option></select></label>}
+      <label className="block text-xs text-[#F5D77F]">رمز الدخول السري PIN (6 أرقام)<input className="field mt-1 w-full text-center tracking-[0.3em]" inputMode="numeric" type="password" autoComplete="new-password" maxLength={6} placeholder="عيّن رمز الدخول للحساب" value={code} onChange={e => setCode(e.target.value.replace(/\D/g, '').slice(0, 6))} disabled={busy} /><span className="mt-1 block text-[11px] text-gray-500">يستعمل المدير أو المسؤول هذا الرمز للدخول باسمه.</span></label>
+      <button className="gold-button sm:col-span-2" disabled={busy}>{busy ? 'جارٍ الحفظ...' : 'إنشاء الحساب وحفظ رمز الدخول'}</button>
     </form>
     <div className="space-y-3">
       {accounts.map(account => <article key={account.uid} className="space-y-2 rounded-xl border border-white/10 bg-[#080808] p-3">
