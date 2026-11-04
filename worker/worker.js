@@ -404,14 +404,7 @@ async function handleListResource(request, resource, projectId, accessToken, cor
 async function handleCreateResource(request, resource, callerUid, projectId, accessToken, corsHeaders, callerRole = 'super_admin') {
   const payload = await parseJsonBody(request);
   const workerPin = resource === 'workers' ? payload?.pin : undefined;
-  if (resource === 'workers') {
-    if (workerPin !== undefined && callerRole !== 'super_admin') {
-      throw createHttpError('تعيين PIN لمشرف العمال من اختصاص المشرف العام فقط', 403, 'worker_pin_super_admin_only');
-    }
-    if (workerPin !== undefined && (typeof workerPin !== 'string' || !/^\d{6}$/.test(workerPin))) {
-      throw createHttpError('PIN يجب أن يتكون من 6 أرقام بالضبط', 400, 'invalid_pin');
-    }
-  }
+  if (resource === 'workers') assertWorkerPinCreationAllowed(callerRole, workerPin);
   const resourcePayload = resource === 'workers' ? { ...payload } : payload;
   if (resource === 'workers') delete resourcePayload.pin;
   if (resource === 'tasks') assertTaskCreationFieldsAllowed(resourcePayload);
@@ -673,6 +666,17 @@ export function assertResponsibleWorkerFieldsAllowed(role, payload) {
  * @param {string} method
  * @param {string | null} [action=null]
  */
+export function assertWorkerPinCreationAllowed(role, pin) {
+  if (pin === undefined || pin === null || pin === '') return true;
+  if (role !== 'super_admin') {
+    throw createHttpError('تعيين PIN لمشرف العمال من اختصاص المشرف العام فقط', 403, 'worker_pin_super_admin_only');
+  }
+  if (typeof pin !== 'string' || !/^\d{6}$/.test(pin)) {
+    throw createHttpError('PIN يجب أن يتكون من 6 أرقام بالضبط', 400, 'invalid_pin');
+  }
+  return true;
+}
+
 export function assertWorkerManagementPermission(role, method, action = null) {
   if (role === 'super_admin') return true;
   if (action === 'pin') {
