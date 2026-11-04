@@ -446,7 +446,7 @@ async function handleCreateResource(request, resource, callerUid, projectId, acc
     if (![1, 2, 3].includes(assignedWorker.machineNumber) || !['day', 'night'].includes(assignedWorker.shift)) throw createHttpError('حساب مشرف العمال غير مربوط بمكينة ووردية', 409, 'worker_machine_assignment_missing');
     taskDetails = { assignedWorkerName: assignedWorker.name, machineNumber: assignedWorker.machineNumber, shift: assignedWorker.shift, modelId: payload.modelId, modelName: model.name, modelCategory: model.category };
   }
-  const record = { id, ...defaults, ...safePayload, ...taskDetails, createdBy: callerUid, createdAt: now, updatedAt: now, ...(clientMutationId ? { creationMutationId: clientMutationId } : {}) };
+  const record = { id, ...defaults, ...safePayload, ...taskDetails, createdBy: callerUid, createdAt: now, updatedAt: now, ...(clientMutationId ? { creationMutationId: clientMutationId, creationFingerprint: resourceCreationFingerprint(safePayload, resource) } : {}) };
   const writes = [{ update: { name: `projects/${projectId}/databases/(default)/documents/${resource}/${id}`, fields: convertToFirestoreFields(record) }, currentDocument: { exists: false } }];
   if (resource === 'workers' && record.status === 'active') {
     const slotPath = workerMachineSlotPath(record.machineNumber, record.shift);
@@ -590,16 +590,22 @@ export function buildResourceCreationId(resource, clientMutationId) {
   return `${prefix}_${mutation.replace(/-/g, '')}`;
 }
 
-export function isSameResourceCreation(existing, payload, resource, clientMutationId, callerUid) {
-  if (!existing || existing.creationMutationId !== clientMutationId || existing.createdBy !== callerUid) return false;
+export function resourceCreationFingerprint(payload, resource) {
   const fields = resource === 'workers'
-    ? ['name', 'phone', 'machineNumber', 'shift', 'status']
+    ? ['name', 'phone', 'machineNumber', 'shift']
     : ['title', 'description', 'assignedWorkerId', 'modelId', 'targetQuantity', 'dueDate'];
-  const defaultValues = resource === 'workers' ? { status: 'active' } : { status: 'open' };
-  return fields.every(key => {
-    const requested = payload[key] === undefined ? defaultValues[key] : payload[key];
-    return requested === undefined || existing[key] === requested;
-  });
+  const snapshot = {};
+  for (const key of fields) {
+    if (payload[key] !== undefined) snapshot[key] = payload[key];
+  }
+  return JSON.stringify(snapshot);
+}
+
+export function isSameResourceCreation(existing, payload, resource, clientMutationId, callerUid) {
+  return Boolean(existing &&
+    existing.creationMutationId === clientMutationId &&
+    existing.createdBy === callerUid &&
+    existing.creationFingerprint === resourceCreationFingerprint(payload, resource));
 }
 
 export function assertTaskUpdateStatusAllowed(currentStatus, requestedStatus) {
