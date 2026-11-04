@@ -28,6 +28,7 @@ import {
   safeDecodeUriSegment,
   buildWorkerFreezeUpdate,
   assertWorkerManagementPermission,
+  assertTaskManagementPermission,
   assertResponsibleWorkerFieldsAllowed,
   assertSuperAdminManagementAccountsPermission,
   assertManagementAccountUpdateAllowed,
@@ -423,6 +424,20 @@ export async function runAllTests() {
 
   // 9. Worker account freeze is reversible; the record is retained, never hard-deleted.
   console.log('\n9. اختبارات تجميد حساب العامل دون حذفه:');
+  assert(assertTaskManagementPermission('admin') === true, 'السماح للمدير العام بإدارة مهام الإنتاج');
+  assert(assertTaskManagementPermission('super_admin') === true, 'السماح للمشرف العام بإدارة مهام الإنتاج');
+  assertThrowsWithCode(
+    () => assertTaskManagementPermission('responsible'),
+    'task_management_forbidden',
+    'منع المسؤول من إدارة مهام الإنتاج',
+    403
+  );
+  assertThrowsWithCode(
+    () => assertTaskManagementPermission('worker'),
+    'task_management_forbidden',
+    'منع مشرف العمال من إدارة مهام الإنتاج الإدارية',
+    403
+  );
   assert(assertWorkerManagementPermission('admin', 'POST') === true, 'السماح للمدير العام بإضافة مشرفي العمال');
   assert(assertWorkerManagementPermission('admin', 'PUT', 'pin') === true, 'السماح للمدير العام بتعيين كود دخول مشرف العمال');
   assert(assertWorkerManagementPermission('admin', 'GET') === true, 'السماح للمدير العام بقراءة قائمة مشرفي العمال');
