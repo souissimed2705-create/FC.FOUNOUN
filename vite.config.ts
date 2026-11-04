@@ -5,7 +5,10 @@ import { defineConfig } from 'vite';
 import { VitePWA } from 'vite-plugin-pwa';
 
 export default defineConfig(() => {
+  const basePath = process.env.GITHUB_PAGES === 'true' ? '/FC.FOUNOUN/' : '/';
+
   return {
+    base: basePath,
     plugins: [
       react(),
       tailwindcss(),
@@ -23,8 +26,8 @@ export default defineConfig(() => {
           orientation: 'portrait',
           dir: 'rtl',
           lang: 'ar',
-          start_url: '/',
-          scope: '/',
+          start_url: basePath,
+          scope: basePath,
           icons: [
             {
               src: '/pwa-192x192.png',
