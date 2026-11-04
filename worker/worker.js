@@ -554,7 +554,12 @@ export function assertResponsibleWorkerFieldsAllowed(role, payload) {
   return true;
 }
 
-export function assertWorkerManagementPermission(role, method, action: string | null = null) {
+/**
+ * @param {string} role
+ * @param {string} method
+ * @param {string | null} [action=null]
+ */
+export function assertWorkerManagementPermission(role, method, action = null) {
   if (role === 'super_admin') return true;
   if (role === 'admin' && ['GET', 'POST', 'PUT', 'DELETE'].includes(method)) return true;
   if (role === 'responsible' && ['GET', 'POST', 'PUT', 'DELETE'].includes(method)) return true;
