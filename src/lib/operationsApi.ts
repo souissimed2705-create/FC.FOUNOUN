@@ -1,5 +1,5 @@
 import { auth } from './firebase';
-import type { OperationsResponse, ProgressPayload, TaskPayload, TaskRecord, WorkerPayload, WorkerRecord, ChatMessage } from '../types/operations';
+import type { OperationsResponse, ProgressPayload, TaskPayload, TaskRecord, WorkerPayload, WorkerRecord, ChatMessage, MachineCycleRecord } from '../types/operations';
 
 const BASE = ((import.meta.env.VITE_WORKER_URL as string | undefined) || 'https://shiny-bird-56fc.souissimed2705.workers.dev').replace(/\/$/, '');
 const QUEUE_KEY = 'fc-founoun-offline-operations-v1';
@@ -27,6 +27,9 @@ export const updateTask = (id: string, payload: Partial<TaskPayload & Pick<TaskR
 export const recordProgress = (id: string, payload: ProgressPayload) => request<OperationsResponse<TaskRecord>>(`/api/tasks/${encodeURIComponent(id)}/progress`, { method: 'POST', body: JSON.stringify(payload) });
 export const listConversation = (workerId: string) => request<OperationsResponse<ChatMessage[]>>(`/api/messages?workerId=${encodeURIComponent(workerId)}`);
 export const sendManagementMessage = (workerId: string, text: string) => request<OperationsResponse<ChatMessage>>('/api/messages', { method: 'POST', body: JSON.stringify({ workerId, text }) });
+export const listMachineCycles = () => request<OperationsResponse<MachineCycleRecord[]>>('/api/cycles?pageSize=100');
+export const listMyMachineCycles = () => request<OperationsResponse<MachineCycleRecord[]>>('/api/worker/cycles');
+export const submitMachineCycle = (count: number, photo: string) => request<OperationsResponse<MachineCycleRecord>>('/api/worker/cycles', { method: 'POST', body: JSON.stringify({ count, photo }) });
 
 type QueuedMutation = { id: string; path: string; init: RequestInit; createdAt: string };
 export function queueMutation(path: string, init: RequestInit) { const queue = readQueue(); queue.push({ id: crypto.randomUUID(), path, init, createdAt: new Date().toISOString() }); localStorage.setItem(QUEUE_KEY, JSON.stringify(queue)); }
