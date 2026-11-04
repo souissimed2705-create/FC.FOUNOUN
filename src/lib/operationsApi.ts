@@ -28,6 +28,7 @@ export const recordProgress = (id: string, payload: ProgressPayload) => request<
 export const listConversation = (workerId: string) => request<OperationsResponse<ChatMessage[]>>(`/api/messages?workerId=${encodeURIComponent(workerId)}`);
 export const sendManagementMessage = (workerId: string, text: string) => request<OperationsResponse<ChatMessage>>('/api/messages', { method: 'POST', body: JSON.stringify({ workerId, text }) });
 export const listMachineCycles = () => request<OperationsResponse<MachineCycleRecord[]>>('/api/cycles?pageSize=100');
+export const getMachineCyclePhoto = (id: string) => request<OperationsResponse<{ id: string; photo: string }>>(`/api/cycles/${encodeURIComponent(id)}/photo`);
 export const listMyMachineCycles = () => request<OperationsResponse<MachineCycleRecord[]>>('/api/worker/cycles');
 export const submitMachineCycle = (count: number, photo: string) => request<OperationsResponse<MachineCycleRecord>>('/api/worker/cycles', { method: 'POST', body: JSON.stringify({ count, photo }) });
 
