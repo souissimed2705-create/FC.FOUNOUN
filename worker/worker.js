@@ -983,7 +983,7 @@ async function handleWorkerCycles(request, workerId, projectId, accessToken, cor
     throw createHttpError('لم يحدد المشرف العام المكينة والوردية لهذا الحساب بعد', 409, 'machine_assignment_missing');
   }
   if (request.method === 'GET') {
-    const rows = await listFirestoreDocs(projectId, accessToken, 'machine_cycles', 100);
+    const rows = await listAllFirestoreDocs(projectId, accessToken, 'machine_cycles', 100, 1000);
     const reports = rows.documents.map(doc => convertFromFirestoreFields(doc.fields || {}))
       .filter(item => item.workerId === workerId)
       .sort((a, b) => String(b.recordedAt || '').localeCompare(String(a.recordedAt || '')))
@@ -1038,11 +1038,13 @@ async function handleListCycles(request, projectId, accessToken, corsHeaders) {
   const url = new URL(request.url);
   const requested = Number(url.searchParams.get('pageSize') || '100');
   const pageSize = Number.isInteger(requested) ? Math.min(Math.max(requested, 1), 200) : 100;
-  const result = await listFirestoreDocs(projectId, accessToken, 'machine_cycles', pageSize);
+  // Load the full recent history in bounded pages so the UI does not silently
+  // stop showing reports after the first 100 records.
+  const result = await listAllFirestoreDocs(projectId, accessToken, 'machine_cycles', pageSize, 1000);
   const data = result.documents.map(doc => convertFromFirestoreFields(doc.fields || {}))
     .sort((a, b) => String(b.recordedAt || '').localeCompare(String(a.recordedAt || '')))
     .map(({ photo, ...report }) => ({ ...report, hasPhoto: Boolean(photo) }));
-  return jsonResponse({ success: true, data, nextPageToken: result.nextPageToken }, 200, corsHeaders);
+  return jsonResponse({ success: true, data, hasMore: Boolean(result.nextPageToken) }, 200, corsHeaders);
 }
 
 async function handleWorkerListTasks(workerId, projectId, accessToken, corsHeaders) {
