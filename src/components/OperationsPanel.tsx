@@ -11,6 +11,8 @@ interface Props { initialSection: 'workers' | 'tasks'; admin: UserProfile; }
 
 export const OperationsPanel: React.FC<Props> = ({ initialSection, admin }) => {
   const isSupervisor = admin.role === 'super_admin';
+  const isResponsible = admin.role === 'responsible';
+  const canManageWorkers = ['super_admin', 'admin', 'responsible'].includes(admin.role);
   const [section, setSection] = useState<Section>(initialSection);
   const [workers, setWorkers] = useState<WorkerRecord[]>([]);
   const [tasks, setTasks] = useState<TaskRecord[]>([]);
@@ -150,7 +152,7 @@ export const OperationsPanel: React.FC<Props> = ({ initialSection, admin }) => {
     open: 'جديدة', in_progress: 'قيد التنفيذ', pending: 'معلّقة', completed: 'مكتملة', cancelled: 'ملغاة'
   }[status]);
   const tabs: { id: Section; label: string }[] = [
-    ...(isSupervisor ? [{ id: 'workers' as const, label: 'إدارة العمال' }] : []),
+    ...(canManageWorkers ? [{ id: 'workers' as const, label: 'إدارة مشرفي العمال' }] : []),
     { id: 'tasks', label: 'أوامر الإنتاج' },
     { id: 'cycles', label: 'عدد دورات المكائن' },
     { id: 'messages', label: 'المحادثة' },
@@ -165,29 +167,29 @@ export const OperationsPanel: React.FC<Props> = ({ initialSection, admin }) => {
     {error && <div role="alert" className="rounded-lg border border-red-500/40 bg-red-950/40 p-3 text-sm text-red-200">{error}</div>}
     {notice && <div className="rounded-lg border border-emerald-500/40 bg-emerald-950/30 p-3 text-sm text-emerald-200">{notice}</div>}
 
-    {section === 'workers' && isSupervisor && <div className="space-y-4">
+    {section === 'workers' && canManageWorkers && <div className="space-y-4">
       <h3 className="font-bold text-[#F5D77F]">إدارة العمال ورموز الدخول</h3>
-      <form onSubmit={addWorker} className="grid grid-cols-1 sm:grid-cols-3 gap-2">
+      {!isResponsible && <form onSubmit={addWorker} className="grid grid-cols-1 sm:grid-cols-2 gap-2">
         <input className="field" placeholder="اسم العامل" value={name} onChange={e => setName(e.target.value)} />
         <input className="field" placeholder="الهاتف (اختياري)" value={phone} onChange={e => setPhone(e.target.value)} />
         <select className="field" value={machineNumber} onChange={e => setMachineNumber(e.target.value as '1' | '2' | '3')}><option value="1">المكينة 1</option><option value="2">المكينة 2</option><option value="3">المكينة 3</option></select>
         <select className="field" value={shift} onChange={e => setShift(e.target.value as 'day' | 'night')}><option value="day">الوردية النهارية</option><option value="night">الوردية الليلية</option></select>
-        <button className="gold-button">إضافة مشرف عمال</button>
-      </form>
+        <button className="gold-button sm:col-span-2">إضافة مشرف عمال</button>
+      </form>}
       <div className="space-y-2">{workers.map(w => <div key={w.id} className="flex flex-wrap items-center gap-2 rounded-xl border border-white/10 bg-[#0A0A0A] p-3">
         <input className="field min-w-0 flex-1" aria-label="اسم العامل" value={workerEdits[w.id]?.name ?? w.name} onChange={e => setWorkerEdits(current => ({ ...current, [w.id]: { name: e.target.value, phone: current[w.id]?.phone ?? w.phone ?? '', machineNumber: current[w.id]?.machineNumber ?? String(w.machineNumber || ''), shift: current[w.id]?.shift ?? w.shift ?? 'day' } }))} />
-        <input className="field w-32" aria-label="هاتف العامل" value={workerEdits[w.id]?.phone ?? w.phone ?? ''} onChange={e => setWorkerEdits(current => ({ ...current, [w.id]: { name: current[w.id]?.name ?? w.name, phone: e.target.value, machineNumber: current[w.id]?.machineNumber ?? String(w.machineNumber || ''), shift: current[w.id]?.shift ?? w.shift ?? 'day' } }))} />
+        {!isResponsible && <input className="field w-32" aria-label="هاتف العامل" value={workerEdits[w.id]?.phone ?? w.phone ?? ''} onChange={e => setWorkerEdits(current => ({ ...current, [w.id]: { name: current[w.id]?.name ?? w.name, phone: e.target.value, machineNumber: current[w.id]?.machineNumber ?? String(w.machineNumber || ''), shift: current[w.id]?.shift ?? w.shift ?? 'day' } }))} />}
         <span className="text-xs text-[#F5D77F]">المكينة {w.machineNumber ?? 'غير محددة'} · {w.shift === 'day' ? 'نهار' : w.shift === 'night' ? 'ليل' : 'وردية غير محددة'}</span><span className="text-xs text-gray-500 font-mono">المعرّف: {w.id}</span>
         <span className="text-xs text-gray-400">{w.status}</span>
-        <select className="field w-28" aria-label="المكينة" value={workerEdits[w.id]?.machineNumber ?? String(w.machineNumber || '')} onChange={e => setWorkerEdits(current => ({ ...current, [w.id]: { name: current[w.id]?.name ?? w.name, phone: current[w.id]?.phone ?? w.phone ?? '', machineNumber: e.target.value, shift: current[w.id]?.shift ?? w.shift ?? 'day' } }))}><option value="">المكينة</option><option value="1">مكينة 1</option><option value="2">مكينة 2</option><option value="3">مكينة 3</option></select>
-        <select className="field w-28" aria-label="الوردية" value={workerEdits[w.id]?.shift ?? w.shift ?? 'day'} onChange={e => setWorkerEdits(current => ({ ...current, [w.id]: { name: current[w.id]?.name ?? w.name, phone: current[w.id]?.phone ?? w.phone ?? '', machineNumber: current[w.id]?.machineNumber ?? String(w.machineNumber || ''), shift: e.target.value as 'day' | 'night' } }))}><option value="day">نهار</option><option value="night">ليل</option></select>
-        <button className="secondary-button" onClick={() => { if (!workerEdits[w.id]?.machineNumber && !w.machineNumber) { setError('حدد المكينة والوردية أولاً.'); return; } void runMutation(() => updateWorker(w.id, { ...(workerEdits[w.id] || { name: w.name, phone: w.phone || '', machineNumber: String(w.machineNumber || ''), shift: w.shift || 'day' }), machineNumber: Number(workerEdits[w.id]?.machineNumber || w.machineNumber) as 1 | 2 | 3 })) }}>حفظ البيانات</button>
+        {!isResponsible && <><select className="field w-28" aria-label="المكينة" value={workerEdits[w.id]?.machineNumber ?? String(w.machineNumber || '')} onChange={e => setWorkerEdits(current => ({ ...current, [w.id]: { name: current[w.id]?.name ?? w.name, phone: current[w.id]?.phone ?? w.phone ?? '', machineNumber: e.target.value, shift: current[w.id]?.shift ?? w.shift ?? 'day' } }))}><option value="">المكينة</option><option value="1">مكينة 1</option><option value="2">مكينة 2</option><option value="3">مكينة 3</option></select>
+        <select className="field w-28" aria-label="الوردية" value={workerEdits[w.id]?.shift ?? w.shift ?? 'day'} onChange={e => setWorkerEdits(current => ({ ...current, [w.id]: { name: current[w.id]?.name ?? w.name, phone: current[w.id]?.phone ?? w.phone ?? '', machineNumber: current[w.id]?.machineNumber ?? String(w.machineNumber || ''), shift: e.target.value as 'day' | 'night' } }))}><option value="day">نهار</option><option value="night">ليل</option></select></>}
+        <button className="secondary-button" onClick={() => { if (!isResponsible && !workerEdits[w.id]?.machineNumber && !w.machineNumber) { setError('حدد المكينة والوردية أولاً.'); return; } const edit = workerEdits[w.id] || { name: w.name, phone: w.phone || '', machineNumber: String(w.machineNumber || ''), shift: w.shift || 'day' }; void runMutation(() => updateWorker(w.id, isResponsible ? { name: edit.name } : { ...edit, machineNumber: Number(edit.machineNumber) as 1 | 2 | 3 })); }}>حفظ البيانات</button>
         <input className="field w-28" inputMode="numeric" maxLength={6} placeholder="PIN جديد" value={pinId === w.id ? pin : ''} onChange={e => { setPinId(w.id); setPin(e.target.value.replace(/\D/g, '')); }} />
         <button className="secondary-button" onClick={() => {
           if (pinId !== w.id || !/^\d{6}$/.test(pin)) { setError('PIN يجب أن يتكون من 6 أرقام بالضبط.'); return; }
           void runMutation(() => setWorkerPin(w.id, pin)); setPin(''); setPinId('');
         }}>حفظ PIN</button>
-        <button className={w.status === 'active' ? 'danger-button' : 'secondary-button'} onClick={() => void runMutation(() => updateWorker(w.id, { status: w.status === 'active' ? 'inactive' : 'active' }))}>{w.status === 'active' ? 'تجميد العامل' : 'إعادة التفعيل'}</button>
+        {isSupervisor && <button className={w.status === 'active' ? 'danger-button' : 'secondary-button'} onClick={() => void runMutation(() => updateWorker(w.id, { status: w.status === 'active' ? 'inactive' : 'active' }))}>{w.status === 'active' ? 'تجميد الحساب' : 'إعادة التفعيل'}</button>}
       </div>)}</div>
     </div>}
 
