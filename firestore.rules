@@ -31,18 +31,18 @@ service cloud.firestore {
     // Mutating operations (create, update, delete) are handled securely via Cloudflare Worker backend
     match /models/{modelId} {
       allow read: if true;
-      allow write: if isSuperAdmin();
+      allow write: if isAdminOrSuperAdmin();
     }
 
     // Model names reservation locks: Internal unique namespace index
     match /model_names/{nameHash} {
       allow read: if isAuthenticated();
-      allow write: if isSuperAdmin();
+      allow write: if isAdminOrSuperAdmin();
     }
 
     // Worker management collections: all mutations are authorized by the Worker backend.
     match /workers/{workerId} {
-      allow read, write: if isSuperAdmin();
+      allow read, write: if isAdminOrSuperAdmin();
     }
 
     // PIN material is restricted to the backend-admin path and must never be client-readable.
@@ -52,7 +52,7 @@ service cloud.firestore {
 
     // Task management collection: all mutations are authorized by the Worker backend.
     match /tasks/{taskId} {
-      allow read, write: if isSuperAdmin();
+      allow read, write: if isAdminOrSuperAdmin();
     }
   }
 }
