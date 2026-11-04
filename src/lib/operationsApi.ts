@@ -9,6 +9,11 @@ async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
   const response = await fetch(`${BASE}${path}`, { ...init, headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${await token()}`, ...(init.headers || {}) } });
   const body = await response.json().catch(() => null);
   if (!response.ok || !body?.success) throw new Error(body?.error || `فشل الطلب (${response.status})`);
+  // Normalize the Worker named-resource responses to the data shape consumed by the UI.
+  if (body.data === undefined) {
+    const resourceData = body.workers ?? body.tasks ?? body.worker ?? body.task ?? body;
+    return { ...body, data: resourceData } as T;
+  }
   return body as T;
 }
 export const listWorkers = () => request<OperationsResponse<WorkerRecord[]>>('/api/workers');
