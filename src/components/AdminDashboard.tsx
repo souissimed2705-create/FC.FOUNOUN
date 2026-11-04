@@ -11,8 +11,8 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ admin, onLogout,
   const [tab, setTab] = useState<Tab>('models');
   const tabs = [
     { id: 'models' as const, label: 'الموديلات', icon: Package },
-    { id: 'workers' as const, label: 'العمال وPIN', icon: Users },
-    { id: 'tasks' as const, label: 'المهام والإنجاز', icon: ClipboardList },
+    ...(admin.role === 'super_admin' ? [{ id: 'workers' as const, label: 'إدارة العمال وPIN', icon: Users }] : []),
+    { id: 'tasks' as const, label: 'أوامر الإنتاج والمحادثة', icon: ClipboardList },
   ];
   return <div className="w-full max-w-5xl mx-auto space-y-5" dir="rtl">
     <header className="rounded-2xl bg-gradient-to-r from-[#17150E] via-[#1F1C12] to-[#121212] border border-[#D4AF37]/40 p-4 sm:p-6 shadow-2xl">
@@ -22,9 +22,9 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ admin, onLogout,
       </div>
       <div className="mt-5 grid grid-cols-2 sm:grid-cols-4 gap-2 text-xs"><div className="stat"><ShieldCheck className="w-4 h-4 text-[#D4AF37]" /><span>{admin.role}</span></div><div className="stat"><KeyRound className="w-4 h-4 text-emerald-400" /><span>{admin.status}</span></div><div className="stat col-span-2"><span className="text-gray-400">المشروع:</span><span className="font-mono">fc-founoun</span></div></div>
     </header>
-    <nav className="grid grid-cols-3 gap-2 rounded-2xl border border-white/10 bg-[#111] p-2">{tabs.map(({ id, label, icon: Icon }) => <button key={id} onClick={() => setTab(id)} className={`tab-button ${tab === id ? 'tab-active' : ''}`}><Icon className="w-4 h-4" />{label}</button>)}</nav>
+    <nav className={`grid ${admin.role === "super_admin" ? "grid-cols-3" : "grid-cols-2"} gap-2 rounded-2xl border border-white/10 bg-[#111] p-2">{tabs.map(({ id, label, icon: Icon }) => <button key={id} onClick={() => setTab(id)} className={`tab-button ${tab === id ? 'tab-active' : ''}`}><Icon className="w-4 h-4" />{label}</button>)}</nav>
     {tab === 'models' && <ModelsPanel />}
-    {tab === 'workers' && <OperationsPanel initialSection="workers" />}
-    {tab === 'tasks' && <OperationsPanel initialSection="tasks" />}
+    {tab === 'workers' && admin.role === 'super_admin' && <OperationsPanel initialSection="workers" admin={admin} />}
+    {tab === 'tasks' && <OperationsPanel initialSection="tasks" admin={admin} />}
   </div>;
 };
