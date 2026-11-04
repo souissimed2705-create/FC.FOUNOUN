@@ -12,8 +12,8 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ admin, onLogout,
   const isSupervisor = admin.role === 'super_admin';
   const roleName = isSupervisor ? 'المشرف' : 'المسؤول';
   const greeting = isSupervisor
-    ? 'أهلاً بك. من هنا تشرف على العمال ورموز الدخول وتتابع سير الإنتاج.'
-    : 'أهلاً بك. يمكنك إصدار أوامر الإنتاج ومتابعة تنفيذها والتواصل مع العمال.';
+    ? 'أهلاً بك. أشرف على العمال ورموز الدخول وتابع سير الإنتاج.'
+    : 'أهلاً بك. أصدر أوامر الإنتاج وتابع تنفيذها وتواصل مع العمال.';
 
   const go = (next: Page) => setPage(next);
   const backHome = () => setPage('home');
