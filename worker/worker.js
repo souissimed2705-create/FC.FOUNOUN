@@ -71,14 +71,20 @@ export default {
     const cleanPath = url.pathname.replace(/\/+$/, '') || '/';
 
     // 2. Strict API Path Routing
-    if (!cleanPath.startsWith('/api/models')) {
+    const managementRoute = parseManagementRoute(cleanPath, request.method);
+    if (managementRoute?.error) {
+      return jsonResponse({ success: false, error: managementRoute.error.message, code: managementRoute.error.code }, 400, corsHeaders);
+    }
+    if (!managementRoute && !cleanPath.startsWith('/api/models')) {
       return jsonResponse({ success: false, error: 'المسار المطلوب غير موجود', code: 'not_found' }, 404, corsHeaders);
     }
 
     let modelIdParam = null;
     const modelsPrefix = '/api/models';
 
-    if (cleanPath === modelsPrefix) {
+    if (managementRoute) {
+      // Validated by parseManagementRoute; no nested or ambiguous paths reach handlers.
+    } else if (cleanPath === modelsPrefix) {
       if (request.method !== 'GET' && request.method !== 'POST') {
         return jsonResponse(
           { success: false, error: 'طريقة الطلب غير مدعومة لهذا المسار، استخدم GET للعرض أو POST لإنشاء موديل', code: 'method_not_allowed' },
@@ -151,6 +157,10 @@ export default {
       await verifySuperAdminRole(callerUid, projectId, saAccessToken);
 
       // 5. Dispatch Route Handlers
+      if (managementRoute) {
+        return await dispatchManagementRoute(request, managementRoute, callerUid, projectId, saAccessToken, corsHeaders);
+      }
+
       if (request.method === 'GET') {
         return await handleListModels(request, projectId, saAccessToken, corsHeaders);
       }
@@ -181,6 +191,175 @@ export default {
 // ==========================================
 // ROUTE HANDLERS
 // ==========================================
+
+const RESOURCE_ID_REGEX = /^[a-zA-Z0-9_-]{3,64}$/;
+
+function parseManagementRoute(path, method) {
+  const match = path.match(/^\/api\/(workers|tasks)(?:\/([^/]+)(?:\/([^/]+))?)?$/);
+  if (!match) return null;
+  const resource = match[1];
+  let id = null;
+  try {
+    id = match[2] ? safeDecodeUriSegment(match[2]) : null;
+  } catch (err) {
+    return { error: err };
+  }
+  if (id && !RESOURCE_ID_REGEX.test(id)) {
+    return { error: createHttpError('معرّف المورد في المسار غير صالح', 400, 'invalid_resource_id') };
+  }
+  const suffix = match[3] || null;
+  if (suffix && (resource !== 'workers' || suffix !== 'pin' || method !== 'PUT')) {
+    return null;
+  }
+  if (resource === 'workers') {
+    if (!id && !['GET', 'POST'].includes(method)) return null;
+    if (id && !suffix && !['PUT', 'DELETE'].includes(method)) return null;
+  } else {
+    if (!id && !['GET', 'POST', 'PUT'].includes(method)) return null;
+    if (id && !suffix && method !== 'PUT') return null;
+    if (id && suffix !== 'progress') return null;
+  }
+  return { resource, id, action: suffix };
+}
+
+async function dispatchManagementRoute(request, route, callerUid, projectId, accessToken, corsHeaders) {
+  if (route.resource === 'workers' && route.action === 'pin') {
+    return handleSetWorkerPin(request, route.id, callerUid, projectId, accessToken, corsHeaders);
+  }
+  if (route.resource === 'workers') {
+    if (request.method === 'GET') return handleListResource(request, 'workers', projectId, accessToken, corsHeaders);
+    if (request.method === 'POST') return handleCreateResource(request, 'workers', callerUid, projectId, accessToken, corsHeaders);
+    if (request.method === 'PUT') return handleUpdateResource(request, 'workers', route.id, callerUid, projectId, accessToken, corsHeaders);
+    return handleDeleteResource(route.id, 'workers', projectId, accessToken, corsHeaders);
+  }
+  if (route.action === 'progress') {
+    return handleTaskProgress(request, route.id, callerUid, projectId, accessToken, corsHeaders);
+  }
+  if (request.method === 'GET') return handleListResource(request, 'tasks', projectId, accessToken, corsHeaders);
+  if (request.method === 'POST') return handleCreateResource(request, 'tasks', callerUid, projectId, accessToken, corsHeaders);
+  if (!route.id) return handleUpdateTaskCollection(request, callerUid, projectId, accessToken, corsHeaders);
+  return handleUpdateResource(request, 'tasks', route.id, callerUid, projectId, accessToken, corsHeaders);
+}
+
+const RESOURCE_FIELDS = {
+  workers: ['name', 'phone', 'email', 'status', 'notes', 'role'],
+  tasks: ['title', 'description', 'status', 'priority', 'assignedWorkerId', 'dueAt'],
+};
+
+function validateResourcePayload(payload, resource, isCreate) {
+  if (!payload || typeof payload !== 'object' || Array.isArray(payload)) {
+    throw createHttpError('محتوى الطلب يجب أن يكون كائناً JSON', 400, 'invalid_payload');
+  }
+  const fields = RESOURCE_FIELDS[resource];
+  const unknown = Object.keys(payload).filter((key) => !fields.includes(key));
+  if (unknown.length) throw createHttpError(`حقول غير مسموحة: ${unknown.join(', ')}`, 400, 'unknown_field');
+  if (isCreate) {
+    const required = resource === 'workers' ? 'name' : 'title';
+    if (typeof payload[required] !== 'string' || !payload[required].trim()) {
+      throw createHttpError(`الحقل ${required} إلزامي`, 400, 'missing_required_field');
+    }
+  }
+  for (const [key, value] of Object.entries(payload)) {
+    if (!['string', 'number', 'boolean'].includes(typeof value) || (typeof value === 'string' && value.length > 2000)) {
+      throw createHttpError(`قيمة الحقل ${key} غير صالحة`, 400, 'invalid_field');
+    }
+  }
+}
+
+async function parseJsonBody(request) {
+  let payload;
+  try { payload = JSON.parse(await readStreamWithLimit(request.body, 64 * 1024)); }
+  catch (err) {
+    if (err?.code === 'payload_too_large') throw err;
+    throw createHttpError('محتوى الطلب ليس بتنسيق JSON صالح', 400, 'invalid_json');
+  }
+  return payload;
+}
+
+async function handleListResource(request, resource, projectId, accessToken, corsHeaders) {
+  const url = new URL(request.url);
+  const requested = Number(url.searchParams.get('pageSize') || '50');
+  const pageSize = Number.isInteger(requested) ? Math.min(Math.max(requested, 1), 100) : 50;
+  const result = await listFirestoreDocs(projectId, accessToken, resource, pageSize);
+  const records = result.documents.map((doc) => sanitizeResourceOutput(convertFromFirestoreFields(doc.fields || {}), resource));
+  return jsonResponse({ success: true, [resource]: records, nextPageToken: result.nextPageToken }, 200, corsHeaders);
+}
+
+async function handleCreateResource(request, resource, callerUid, projectId, accessToken, corsHeaders) {
+  const payload = await parseJsonBody(request);
+  validateResourcePayload(payload, resource, true);
+  const id = `${resource === 'workers' ? 'wkr' : 'tsk'}_${crypto.randomUUID().replace(/-/g, '')}`;
+  const now = new Date().toISOString();
+  const record = { id, ...payload, createdBy: callerUid, createdAt: now, updatedAt: now };
+  const writes = [{ update: { name: `projects/${projectId}/databases/(default)/documents/${resource}/${id}`, fields: convertToFirestoreFields(record) }, currentDocument: { exists: false } }];
+  await commitFirestoreTransaction(projectId, accessToken, null, writes);
+  return jsonResponse({ success: true, [resource === 'workers' ? 'worker' : 'task']: record }, 201, corsHeaders);
+}
+
+async function handleUpdateResource(request, resource, id, callerUid, projectId, accessToken, corsHeaders) {
+  const payload = await parseJsonBody(request);
+  validateResourcePayload(payload, resource, false);
+  const currentDoc = await getFirestoreDoc(projectId, accessToken, `${resource}/${id}`);
+  if (!currentDoc) throw createHttpError('المورد المطلوب غير موجود', 404, 'resource_not_found');
+  const current = convertFromFirestoreFields(currentDoc.fields || {});
+  const record = { ...current, ...payload, updatedBy: callerUid, updatedAt: new Date().toISOString() };
+  const write = { update: { name: `projects/${projectId}/databases/(default)/documents/${resource}/${id}`, fields: convertToFirestoreFields(record) }, currentDocument: { updateTime: currentDoc.updateTime } };
+  await commitFirestoreTransaction(projectId, accessToken, null, [write]);
+  return jsonResponse({ success: true, [resource === 'workers' ? 'worker' : 'task']: sanitizeResourceOutput(record, resource) }, 200, corsHeaders);
+}
+
+async function handleUpdateTaskCollection(request, callerUid, projectId, accessToken, corsHeaders) {
+  const payload = await parseJsonBody(request);
+  if (!payload || typeof payload.id !== 'string' || !RESOURCE_ID_REGEX.test(payload.id)) {
+    throw createHttpError('حقل id الصالح إلزامي عند استخدام PUT /api/tasks', 400, 'missing_task_id');
+  }
+  const { id, ...changes } = payload;
+  const syntheticRequest = new Request(request.url, { method: 'PUT', body: JSON.stringify(changes) });
+  return handleUpdateResource(syntheticRequest, 'tasks', id, callerUid, projectId, accessToken, corsHeaders);
+}
+
+async function handleDeleteResource(id, resource, projectId, accessToken, corsHeaders) {
+  const current = await getFirestoreDoc(projectId, accessToken, `${resource}/${id}`);
+  if (!current) throw createHttpError('المورد المطلوب غير موجود', 404, 'resource_not_found');
+  await commitFirestoreTransaction(projectId, accessToken, null, [{ delete: `projects/${projectId}/databases/(default)/documents/${resource}/${id}`, currentDocument: { updateTime: current.updateTime } }]);
+  return jsonResponse({ success: true, id }, 200, corsHeaders);
+}
+
+async function handleSetWorkerPin(request, workerId, callerUid, projectId, accessToken, corsHeaders) {
+  const payload = await parseJsonBody(request);
+  if (!payload || typeof payload.pin !== 'string' || !/^\d{4,12}$/.test(payload.pin)) {
+    throw createHttpError('PIN يجب أن يكون من 4 إلى 12 رقماً', 400, 'invalid_pin');
+  }
+  const worker = await getFirestoreDoc(projectId, accessToken, `workers/${workerId}`);
+  if (!worker) throw createHttpError('العامل المطلوب غير موجود', 404, 'worker_not_found');
+  const salt = bytesToBase64Url(crypto.getRandomValues(new Uint8Array(16)));
+  const pinHash = await computeWebCryptoSha256(`${salt}:${payload.pin}`);
+  const pinRecord = { workerId, pin_hash: pinHash, pin_salt: salt, updatedBy: callerUid, updatedAt: new Date().toISOString() };
+  await commitFirestoreTransaction(projectId, accessToken, null, [{ update: { name: `projects/${projectId}/databases/(default)/documents/worker_pins/${workerId}`, fields: convertToFirestoreFields(pinRecord) } }]);
+  return jsonResponse({ success: true, workerId, message: 'تم حفظ PIN بشكل hash فقط' }, 200, corsHeaders);
+}
+
+async function handleTaskProgress(request, taskId, callerUid, projectId, accessToken, corsHeaders) {
+  const payload = await parseJsonBody(request);
+  if (!payload || !Number.isInteger(payload.progress) || payload.progress < 0 || payload.progress > 100) {
+    throw createHttpError('progress يجب أن يكون عدداً صحيحاً بين 0 و100', 400, 'invalid_progress');
+  }
+  const currentDoc = await getFirestoreDoc(projectId, accessToken, `tasks/${taskId}`);
+  if (!currentDoc) throw createHttpError('المهمة المطلوبة غير موجودة', 404, 'task_not_found');
+  const current = convertFromFirestoreFields(currentDoc.fields || {});
+  const record = { ...current, progress: payload.progress, updatedBy: callerUid, updatedAt: new Date().toISOString() };
+  await commitFirestoreTransaction(projectId, accessToken, null, [{ update: { name: `projects/${projectId}/databases/(default)/documents/tasks/${taskId}`, fields: convertToFirestoreFields(record) }, currentDocument: { updateTime: currentDoc.updateTime } }]);
+  return jsonResponse({ success: true, task: sanitizeResourceOutput(record, 'tasks') }, 200, corsHeaders);
+}
+
+function sanitizeResourceOutput(record, resource) {
+  const clean = { ...record };
+  delete clean.pin;
+  delete clean.pin_hash;
+  delete clean.pin_salt;
+  if (resource === 'workers') delete clean.password;
+  return clean;
+}
 
 async function handleListModels(request, projectId, accessToken, corsHeaders) {
   const url = new URL(request.url);
@@ -1156,7 +1335,7 @@ async function commitFirestoreTransaction(projectId, accessToken, transactionId,
       Authorization: `Bearer ${accessToken}`,
       'Content-Type': 'application/json',
     },
-    body: JSON.stringify({ transaction: transactionId, writes }),
+    body: JSON.stringify(transactionId ? { transaction: transactionId, writes } : { writes }),
   });
 
   const resData = await resp.json();

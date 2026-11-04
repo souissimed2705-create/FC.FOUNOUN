@@ -32,5 +32,20 @@ service cloud.firestore {
       allow read: if isAuthenticated();
       allow write: if isSuperAdmin();
     }
+
+    // Worker management collections: all mutations are authorized by the Worker backend.
+    match /workers/{workerId} {
+      allow read, write: if isSuperAdmin();
+    }
+
+    // PIN material is restricted to the backend-admin path and must never be client-readable.
+    match /worker_pins/{workerId} {
+      allow read, write: if isSuperAdmin();
+    }
+
+    // Task management collection: all mutations are authorized by the Worker backend.
+    match /tasks/{taskId} {
+      allow read, write: if isSuperAdmin();
+    }
   }
 }
