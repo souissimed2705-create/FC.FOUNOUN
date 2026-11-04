@@ -12,7 +12,7 @@ import {
 import { signInWithEmailAndPassword, signOut } from 'firebase/auth';
 import {
   auth,
-  verifySuperAdmin,
+  verifyAdmin,
   UserProfile,
   mapAuthErrorToArabic,
   mapAuthorizationErrorToArabic,
@@ -101,7 +101,7 @@ export const AdminLoginForm: React.FC<AdminLoginFormProps> = ({
 
       // Step 2 & 3: Query Firestore doc: users/{uid} and verify role and status
       try {
-        const verifiedAdmin = await verifySuperAdmin(uid);
+        const verifiedAdmin = await verifyAdmin(uid);
 
         // Step 5: Authorization successful - grant dashboard entry
         setPassword('');
@@ -165,10 +165,10 @@ export const AdminLoginForm: React.FC<AdminLoginFormProps> = ({
         {/* Card Title & Subtitle */}
         <div className="text-center mb-6 sm:mb-8">
           <h2 className="text-xl sm:text-2xl font-bold text-white tracking-normal font-['Cairo']">
-            تسجيل دخول المسؤول الرئيسي
+            دخول المشرف أو المسؤول
           </h2>
           <p className="mt-1.5 text-xs sm:text-sm text-gray-400 font-normal leading-relaxed">
-            التحقق الثنائي: مصادقة الحساب وفحص صلاحية <span className="font-mono text-[#D4AF37]">super_admin</span> في Firestore
+            التحقق الثنائي: مصادقة الحساب وفحص صلاحية الإدارة <span className="font-mono text-[#D4AF37]">admin / super_admin</span> في Firestore
           </p>
         </div>
 
@@ -322,7 +322,7 @@ export const AdminLoginForm: React.FC<AdminLoginFormProps> = ({
         {/* Security Policy Note */}
         <div className="mt-6 pt-5 border-t border-white/5 text-center">
           <p className="text-[11px] sm:text-xs text-gray-500 leading-normal">
-            مشروع: <span className="font-mono text-gray-400">fc-founoun</span> • مسار الصلاحية: <span className="font-mono text-gray-400">users/{'{uid}'}</span>. الدخول مقتصر على حسابات <span className="font-mono text-[#D4AF37]">super_admin</span> النشطة.
+            مشروع: <span className="font-mono text-gray-400">fc-founoun</span> • مسار الصلاحية: <span className="font-mono text-gray-400">users/{'{uid}'}</span>. الدخول مقتصر على حسابات الإدارة النشطة ذات الدور admin أو super_admin.
           </p>
         </div>
       </div>
