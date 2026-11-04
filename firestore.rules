@@ -42,6 +42,11 @@ service cloud.firestore {
       allow read, write: if false;
     }
 
+    // Responsible day/night reservations are internal coordination records.
+    match /management_responsible_slots/{shift} {
+      allow read, write: if false;
+    }
+
     // Tasks, progress ledger, conversations and cycle reports must only be
     // accessed through Worker endpoints enforcing role/ownership checks.
     match /tasks/{taskId} {
