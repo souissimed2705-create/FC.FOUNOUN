@@ -219,7 +219,7 @@ export default {
       }
       
       if (managementAccountsRoute || managementAccountActionRoute) {
-        if (callerRole !== 'super_admin') throw createHttpError('إدارة حسابات المديرين والمسؤولين من صلاحيات المشرف العام فقط', 403, 'super_admin_only_management_accounts');
+        assertSuperAdminManagementAccountsPermission(callerRole);
         if (managementAccountsRoute && request.method === 'GET') return await handleListManagementAccounts(projectId, saAccessToken, corsHeaders);
         if (managementAccountsRoute && request.method === 'POST') return await handleCreateManagementAccount(request, callerUid, projectId, saAccessToken, corsHeaders);
         const accountId = safeDecodeUriSegment(managementAccountMatch[1]);
@@ -521,6 +521,12 @@ export function assertWorkerManagementPermission(role, method, action = null) {
   if (role === 'admin' && ['GET', 'POST', 'PUT', 'DELETE'].includes(method)) return true;
   if (role === 'responsible' && ['GET', 'POST', 'PUT', 'DELETE'].includes(method)) return true;
   throw createHttpError('لا تملك صلاحية تنفيذ هذه العملية على حسابات مشرفي العمال', 403, 'worker_management_forbidden');
+}
+
+/** @param {string} role */
+export function assertSuperAdminManagementAccountsPermission(role) {
+  if (role === 'super_admin') return true;
+  throw createHttpError('إدارة حسابات المديرين والمسؤولين من صلاحيات المشرف العام فقط', 403, 'super_admin_only_management_accounts');
 }
 
 export function buildWorkerFreezeUpdate(current, timestamp) {
