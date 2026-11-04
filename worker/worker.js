@@ -299,7 +299,15 @@ async function handleCreateResource(request, resource, callerUid, projectId, acc
   const id = `${resource === 'workers' ? 'wkr' : 'tsk'}_${crypto.randomUUID().replace(/-/g, '')}`;
   const now = new Date().toISOString();
   const defaults = resource === 'workers' ? { status: 'active' } : { status: 'open', completedQuantity: 0 };
-  const record = { id, ...defaults, ...payload, createdBy: callerUid, createdAt: now, updatedAt: now };
+  let taskDetails = {};
+  if (resource === 'tasks') {
+    const assignedWorkerDoc = await getFirestoreDoc(projectId, accessToken, `workers/${payload.assignedWorkerId}`);
+    if (!assignedWorkerDoc) throw createHttpError('العامل المحدد غير موجود', 404, 'worker_not_found');
+    const assignedWorker = convertFromFirestoreFields(assignedWorkerDoc.fields || {});
+    if (assignedWorker.status !== 'active') throw createHttpError('لا يمكن إسناد مهمة إلى عامل غير نشط', 409, 'worker_inactive');
+    taskDetails = { assignedWorkerName: assignedWorker.name };
+  }
+  const record = { id, ...defaults, ...taskDetails, ...payload, createdBy: callerUid, createdAt: now, updatedAt: now };
   const writes = [{ update: { name: `projects/${projectId}/databases/(default)/documents/${resource}/${id}`, fields: convertToFirestoreFields(record) }, currentDocument: { exists: false } }];
   await commitFirestoreTransaction(projectId, accessToken, null, writes);
   return jsonResponse({ success: true, [resource === 'workers' ? 'worker' : 'task']: record }, 201, corsHeaders);
@@ -356,6 +364,23 @@ async function handleTaskProgress(request, taskId, callerUid, projectId, accessT
   if (payload.note !== undefined && (typeof payload.note !== 'string' || payload.note.length > 2000)) {
     throw createHttpError('ملاحظة الإنجاز غير صالحة', 400, 'invalid_note');
   }
+  if (typeof payload.clientMutationId !== 'string' || !/^[a-zA-Z0-9_-]{16,80}$/.test(payload.clientMutationId)) {
+    throw createHttpError('معرّف عملية الإنجاز غير صالح', 400, 'invalid_mutation_id');
+  }
+
+  const mutationPath = `task_progress/${payload.clientMutationId}`;
+  const previousMutation = await getFirestoreDoc(projectId, accessToken, mutationPath);
+  if (previousMutation) {
+    const previous = convertFromFirestoreFields(previousMutation.fields || {});
+    if (previous.taskId !== taskId || previous.quantity !== payload.quantity) {
+      throw createHttpError('معرّف العملية مستخدم لعملية إنجاز مختلفة', 409, 'mutation_id_conflict');
+    }
+    const latestDoc = await getFirestoreDoc(projectId, accessToken, `tasks/${taskId}`);
+    if (!latestDoc) throw createHttpError('المهمة المطلوبة غير موجودة', 404, 'task_not_found');
+    const latest = sanitizeResourceOutput(convertFromFirestoreFields(latestDoc.fields || {}), 'tasks');
+    return jsonResponse({ success: true, task: latest, duplicate: true }, 200, corsHeaders);
+  }
+
   const currentDoc = await getFirestoreDoc(projectId, accessToken, `tasks/${taskId}`);
   if (!currentDoc) throw createHttpError('المهمة المطلوبة غير موجودة', 404, 'task_not_found');
   const current = convertFromFirestoreFields(currentDoc.fields || {});
@@ -364,16 +389,41 @@ async function handleTaskProgress(request, taskId, callerUid, projectId, accessT
   if (!Number.isSafeInteger(targetQuantity) || targetQuantity < 1 || completedQuantity > targetQuantity) {
     throw createHttpError('الكمية المنجزة تتجاوز الكمية المطلوبة أو أن بيانات المهمة غير صالحة', 409, 'quantity_exceeds_target');
   }
+
+  const now = new Date().toISOString();
   const record = {
     ...current,
     completedQuantity,
     status: completedQuantity === targetQuantity ? 'completed' : 'in_progress',
     ...(payload.note ? { lastProgressNote: payload.note } : {}),
     updatedBy: callerUid,
-    updatedAt: new Date().toISOString()
+    updatedAt: now
   };
-  await commitFirestoreTransaction(projectId, accessToken, null, [{ update: { name: `projects/${projectId}/databases/(default)/documents/tasks/${taskId}`, fields: convertToFirestoreFields(record) }, currentDocument: { updateTime: currentDoc.updateTime } }]);
-  return jsonResponse({ success: true, task: sanitizeResourceOutput(record, 'tasks') }, 200, corsHeaders);
+  const taskName = `projects/${projectId}/databases/(default)/documents/tasks/${taskId}`;
+  const mutationName = `projects/${projectId}/databases/(default)/documents/${mutationPath}`;
+  const mutationRecord = {
+    id: payload.clientMutationId,
+    taskId,
+    quantity: payload.quantity,
+    createdBy: callerUid,
+    createdAt: now
+  };
+  try {
+    await commitFirestoreTransaction(projectId, accessToken, null, [
+      { update: { name: taskName, fields: convertToFirestoreFields(record) }, currentDocument: { updateTime: currentDoc.updateTime } },
+      { update: { name: mutationName, fields: convertToFirestoreFields(mutationRecord) }, currentDocument: { exists: false } }
+    ]);
+  } catch (err) {
+    // If a retry raced with the first request, the mutation record makes it safe to return success.
+    const racedMutation = await getFirestoreDoc(projectId, accessToken, mutationPath);
+    if (!racedMutation) throw err;
+    const raced = convertFromFirestoreFields(racedMutation.fields || {});
+    if (raced.taskId !== taskId || raced.quantity !== payload.quantity) throw createHttpError('معرّف العملية مستخدم لعملية إنجاز مختلفة', 409, 'mutation_id_conflict');
+    const latestDoc = await getFirestoreDoc(projectId, accessToken, `tasks/${taskId}`);
+    if (!latestDoc) throw createHttpError('المهمة المطلوبة غير موجودة', 404, 'task_not_found');
+    return jsonResponse({ success: true, task: sanitizeResourceOutput(convertFromFirestoreFields(latestDoc.fields || {}), 'tasks'), duplicate: true }, 200, corsHeaders);
+  }
+  return jsonResponse({ success: true, task: sanitizeResourceOutput(record, 'tasks'), duplicate: false }, 200, corsHeaders);
 }
 
 function sanitizeResourceOutput(record, resource) {
