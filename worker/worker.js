@@ -258,6 +258,14 @@ function validateResourcePayload(payload, resource, isCreate) {
     if (typeof payload[required] !== 'string' || !payload[required].trim()) {
       throw createHttpError(`الحقل ${required} إلزامي`, 400, 'missing_required_field');
     }
+    if (resource === 'tasks') {
+      if (typeof payload.assignedWorkerId !== 'string' || !payload.assignedWorkerId.trim()) {
+        throw createHttpError('العامل المسؤول عن المهمة إلزامي', 400, 'missing_worker');
+      }
+      if (!Number.isSafeInteger(payload.targetQuantity) || payload.targetQuantity < 1) {
+        throw createHttpError('الكمية المطلوبة يجب أن تكون عدداً صحيحاً موجباً', 400, 'invalid_target_quantity');
+      }
+    }
   }
   for (const [key, value] of Object.entries(payload)) {
     if (!['string', 'number', 'boolean'].includes(typeof value) || (typeof value === 'string' && value.length > 2000)) {
