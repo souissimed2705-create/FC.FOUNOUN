@@ -1,5 +1,5 @@
 import { auth } from './firebase';
-import type { OperationsResponse, ProgressPayload, TaskPayload, TaskRecord, WorkerPayload, WorkerRecord, ChatMessage, MachineCycleRecord, ManagementAccountRecord } from '../types/operations';
+import type { OperationsResponse, ProgressPayload, TaskPayload, TaskRecord, WorkerPayload, WorkerRecord, ChatMessage, MachineCycleRecord, ManagementAccountRecord, ContactRecord } from '../types/operations';
 
 const BASE = ((import.meta.env.VITE_WORKER_URL as string | undefined) || 'https://shiny-bird-56fc.souissimed2705.workers.dev').replace(/\/$/, '');
 const QUEUE_KEY = 'fc-founoun-offline-operations-v1';
@@ -34,6 +34,9 @@ export const createManagementAccount = (payload: { name: string; role: 'admin' |
 export const updateManagementAccount = (uid: string, payload: { name?: string; status?: 'active' | 'inactive'; shift?: 'day' | 'night' }) => request<OperationsResponse<ManagementAccountRecord>>(`/api/management-accounts/${encodeURIComponent(uid)}`, { method: 'PUT', body: JSON.stringify(payload) });
 export const setManagementCode = (uid: string, code: string) => request<OperationsResponse<{ uid: string }>>(`/api/management-accounts/${encodeURIComponent(uid)}/code`, { method: 'PUT', body: JSON.stringify({ code }) });
 export const freezeManagementAccount = (uid: string) => request<OperationsResponse<ManagementAccountRecord>>(`/api/management-accounts/${encodeURIComponent(uid)}`, { method: 'DELETE' });
+export const listContacts = () => request<OperationsResponse<ContactRecord[]>>('/api/contacts');
+export const listDirectMessages = (otherUid: string) => request<OperationsResponse<ChatMessage[]>>(`/api/direct-messages/${encodeURIComponent(otherUid)}`);
+export const sendDirectMessage = (otherUid: string, text: string) => request<OperationsResponse<ChatMessage>>(`/api/direct-messages/${encodeURIComponent(otherUid)}`, { method: 'POST', body: JSON.stringify({ text }) });
 export const listMyMachineCycles = () => request<OperationsResponse<MachineCycleRecord[]>>('/api/worker/cycles');
 export const submitMachineCycle = (count: number, photo: string) => request<OperationsResponse<MachineCycleRecord>>('/api/worker/cycles', { method: 'POST', body: JSON.stringify({ count, photo }) });
 
