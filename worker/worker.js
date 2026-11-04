@@ -191,7 +191,11 @@ export default {
       }
       if (workerTasksRoute || workerProgressRoute || workerTaskStatusRoute || workerMessagesRoute || workerCyclesRoute) {
         if (decodedToken.role !== 'worker' || decodedToken.workerId !== callerUid) {
-          throw createHttpError('هذه الخدمة مخصصة لحساب العامل فقط', 403, 'worker_only');
+          throw createHttpError('هذه الخدمة مخصصة لحساب مشرف العمال فقط', 403, 'worker_only');
+        }
+        const activeWorkerDoc = await getFirestoreDoc(projectId, saAccessToken, `workers/${callerUid}`);
+        if (!activeWorkerDoc || convertFromFirestoreFields(activeWorkerDoc.fields || {}).status !== 'active') {
+          throw createHttpError('تم تجميد حساب مشرف العمال أو تعطيله', 403, 'worker_inactive');
         }
         if (workerTasksRoute) return await handleWorkerListTasks(callerUid, projectId, saAccessToken, corsHeaders);
         if (workerMessagesRoute) return await handleWorkerMessages(request, callerUid, projectId, saAccessToken, corsHeaders);
