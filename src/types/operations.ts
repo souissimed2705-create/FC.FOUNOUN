@@ -4,7 +4,7 @@ export interface TaskRecord { id: string; title: string; description?: string; m
 export interface WorkerPayload { name: string; phone?: string; status?: WorkerStatus; machineNumber?: 1 | 2 | 3; shift?: 'day' | 'night'; }
 export interface ContactRecord { uid: string; name: string; role: 'super_admin' | 'admin' | 'responsible' | 'worker'; }
 export interface ManagementAccountRecord { uid: string; displayName: string; role: 'admin' | 'responsible'; status: WorkerStatus; shift?: 'day' | 'night' | null; createdAt?: string | null; }
-export interface MachineCycleRecord { id: string; machineNumber: 1 | 2 | 3; shift: 'day' | 'night'; date: string; count: number; workerId: string; workerName: string; recordedAt: string; updatedAt?: string; hasPhoto?: boolean; photo?: string; }
+export interface MachineCycleRecord { id: string; machineNumber: 1 | 2 | 3; shift: 'day' | 'night'; date: string; count: number; workerId: string; workerName: string; recordedAt: string; receivedAt?: string; updatedAt?: string; hasPhoto?: boolean; photo?: string; }
 export interface TaskPayload { title: string; description?: string; modelId?: string; modelName?: string; modelCategory?: string; assignedWorkerId: string; targetQuantity: number; dueDate?: string; }
 export interface ChatMessage { id: string; workerId: string; senderUid: string; senderRole: 'admin' | 'super_admin' | 'responsible' | 'worker'; recipientUid?: string; conversationId?: string; senderName: string; text: string; createdAt: string; }
 export interface ProgressPayload { quantity: number; note?: string; clientMutationId: string; }
