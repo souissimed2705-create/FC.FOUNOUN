@@ -2,7 +2,7 @@ import React, { useCallback, useEffect, useState } from 'react';
 import { signOut } from 'firebase/auth';
 import { Home, ClipboardList, LogOut, MessageCircle, Send, RefreshCw, Gauge } from 'lucide-react';
 import { auth } from '../lib/firebase';
-import { listMyConversation, listMyTasks, recordMyProgress, sendWorkerMessage, updateMyTaskStatus, listMyMachineCycles, submitMachineCycle } from '../lib/operationsApi';
+import { listMyConversation, listMyTasks, recordMyProgress, sendWorkerMessage, updateMyTaskStatus, listMyMachineCycles, submitMachineCycle, queueMutation, flushQueuedMutations, queuedMutationCount } from '../lib/operationsApi';
 import { optimizeAndEncodeImage } from '../utils/imageOptimizer';
 import type { ChatMessage, TaskRecord, MachineCycleRecord } from '../types/operations';
 
@@ -22,6 +22,7 @@ export const WorkerDashboard: React.FC<Props> = ({ worker }) => {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
   const [notice, setNotice] = useState('');
+  const [pendingSync, setPendingSync] = useState(queuedMutationCount());
   const refresh = useCallback(async () => {
     try { const response = await listMyTasks(); setTasks(response.data || []); }
     catch (err) { setError(err instanceof Error ? err.message : 'تعذر تحميل المهام.'); }
@@ -36,6 +37,16 @@ export const WorkerDashboard: React.FC<Props> = ({ worker }) => {
   }, []);
   useEffect(() => { void refresh(); void refreshCycles(); }, [refresh, refreshCycles]);
   useEffect(() => {
+    const onOnline = async () => {
+      const flushed = await flushQueuedMutations();
+      setPendingSync(queuedMutationCount());
+      if (flushed > 0) setNotice(`تمت مزامنة ${flushed} عملية محفوظة دون اتصال.`);
+      await refresh(); await refreshCycles();
+    };
+    window.addEventListener('online', onOnline);
+    return () => window.removeEventListener('online', onOnline);
+  }, [refresh, refreshCycles]);
+  useEffect(() => {
     if (page !== 'messages') return;
     void refreshMessages();
     const timer = window.setInterval(() => void refreshMessages(), 7000);
@@ -48,7 +59,7 @@ export const WorkerDashboard: React.FC<Props> = ({ worker }) => {
     if (!Number.isSafeInteger(count) || count < 0) { setError('أدخل عدداً صحيحاً غير سالب للدورات.'); return; }
     if (!cyclePhoto) { setError('صورة عداد المكينة إلزامية.'); return; }
     setBusy(true); setError(''); setNotice('');
-    try { await submitMachineCycle(count, cyclePhoto); setCycleCount(''); setCyclePhoto(''); setCyclePhotoName(''); setNotice('تم حفظ تقرير الدورات وصورة العداد مع التاريخ والوقت تلقائياً.'); await refreshCycles(); }
+    try { if (!navigator.onLine) { queueMutation('/api/worker/cycles', { method: 'POST', body: JSON.stringify({ count, photo: cyclePhoto }) }); setPendingSync(queuedMutationCount()); setNotice('لا يوجد اتصال؛ حُفظ تقرير الدورات وصورة العداد على الهاتف وسيتزامن عند عودة الاتصال.'); } else { await submitMachineCycle(count, cyclePhoto); setNotice('تم حفظ تقرير الدورات وصورة العداد مع التاريخ والوقت تلقائياً.'); await refreshCycles(); } setCycleCount(''); setCyclePhoto(''); setCyclePhotoName(''); }
     catch (err) { setError(err instanceof Error ? err.message : 'تعذر حفظ تقرير الدورات.'); }
     finally { setBusy(false); }
   };
@@ -58,7 +69,11 @@ export const WorkerDashboard: React.FC<Props> = ({ worker }) => {
     if (quantity > task.targetQuantity - task.completedQuantity) { setError('الكمية أكبر من المتبقي في المهمة.'); return; }
     setBusy(true); setError(''); setNotice('');
     try {
-      await recordMyProgress(task.id, { quantity, clientMutationId: crypto.randomUUID() });
+      const body = { quantity, clientMutationId: crypto.randomUUID() };
+      if (!navigator.onLine) {
+        queueMutation(`/api/worker/tasks/${encodeURIComponent(task.id)}/progress`, { method: 'POST', body: JSON.stringify(body) });
+        setPendingSync(queuedMutationCount()); setNotice('لا يوجد اتصال؛ حُفظت كمية الإنجاز وستتم مزامنتها عند عودة الاتصال.');
+      } else await recordMyProgress(task.id, body);
       setQuantities(v => ({ ...v, [task.id]: '' }));
       setNotice('تم تسجيل الكمية المنجزة.');
       await refresh();
@@ -69,7 +84,10 @@ export const WorkerDashboard: React.FC<Props> = ({ worker }) => {
     const nextStatus = task.status === 'pending' ? 'in_progress' : 'pending';
     setBusy(true); setError(''); setNotice('');
     try {
-      await updateMyTaskStatus(task.id, nextStatus);
+      if (!navigator.onLine) {
+        queueMutation(`/api/worker/tasks/${encodeURIComponent(task.id)}/status`, { method: 'PUT', body: JSON.stringify({ status: nextStatus }) });
+        setPendingSync(queuedMutationCount());
+      } else await updateMyTaskStatus(task.id, nextStatus);
       setNotice(nextStatus === 'pending' ? 'تم تعليق المهمة.' : 'تم استئناف المهمة.');
       await refresh();
     } catch (err) { setError(err instanceof Error ? err.message : 'تعذر تغيير حالة المهمة.'); }
@@ -102,6 +120,7 @@ export const WorkerDashboard: React.FC<Props> = ({ worker }) => {
       </div>
     </>}
 
+    {pendingSync > 0 && <p className="rounded-lg border border-amber-500/40 bg-amber-950/30 p-3 text-xs text-amber-200">عمليات محفوظة بانتظار المزامنة: {pendingSync}</p>}
     {error && <p role="alert" className="rounded-lg bg-red-950/40 p-3 text-sm text-red-200">{error}</p>}
     {notice && <p className="rounded-lg bg-emerald-950/30 p-3 text-sm text-emerald-200">{notice}</p>}
 
