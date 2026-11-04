@@ -474,6 +474,7 @@ async function handleCreateResource(request, resource, callerUid, projectId, acc
 
 async function handleUpdateResource(request, resource, id, callerUid, projectId, accessToken, corsHeaders, callerRole = null) {
   const payload = await parseJsonBody(request);
+  if (Object.prototype.hasOwnProperty.call(payload || {}, 'clientMutationId')) throw createHttpError('معرّف العملية مخصص للإنشاء ولا يمكن تعديله', 400, 'invalid_mutation_id');
   validateResourcePayload(payload, resource, false);
   if (resource === 'workers') assertResponsibleWorkerFieldsAllowed(callerRole, payload);
   const currentDoc = await getFirestoreDoc(projectId, accessToken, `${resource}/${id}`);
