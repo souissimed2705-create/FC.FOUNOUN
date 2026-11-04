@@ -340,7 +340,7 @@ export async function runAllTests() {
   assert(isExactParticipantPair(['user_a', 'user_b'], 'user_a', 'user_b'), 'قبول محادثة بين طرفين محددين');
   assert(!isExactParticipantPair(['user_a', 'user_b', 'user_c'], 'user_a', 'user_b'), 'رفض قراءة محادثة تضم طرفاً ثالثاً');
   assert(!isExactParticipantPair(['user_a', 'user_a'], 'user_a', 'user_b'), 'رفض قائمة مشاركين مكررة أو غير مطابقة');
-  const firestoreRoundTrip = convertFromFirestoreFields(convertToFirestoreFields({ participants: ['user_a', 'user_b'], metadata: { active: true, roles: ['worker', 'admin'] } }));
+  const firestoreRoundTrip = convertFromFirestoreFields(convertToFirestoreFields({ participants: ['user_a', 'user_b'], metadata: { active: true, roles: ['worker', 'admin'] } })) as { participants: string[]; metadata: { active: boolean; roles: string[] } };
   assert(Array.isArray(firestoreRoundTrip.participants) && firestoreRoundTrip.participants.join(',') === 'user_a,user_b', 'حفظ واسترجاع مصفوفة المشاركين بصيغة Firestore ArrayValue');
   assert(firestoreRoundTrip.metadata.active === true && firestoreRoundTrip.metadata.roles.join(',') === 'worker,admin', 'حفظ واسترجاع المصفوفات والكائنات المتداخلة في Firestore');
   const originalWorker = { id: 'wkr_test_001', name: 'عامل اختبار', status: 'active', phone: '20000000' };
