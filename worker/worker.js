@@ -173,7 +173,7 @@ export default {
         throw createHttpError('حساب العامل لا يملك صلاحيات الإدارة', 403, 'worker_admin_forbidden');
       }
       // 4. Verify Super Admin RBAC via Firestore
-      await verifySuperAdminRole(callerUid, projectId, saAccessToken);
+      await verifyManagementRole(callerUid, projectId, saAccessToken);
 
       // 5. Dispatch Route Handlers
       if (managementRoute) {
@@ -1495,7 +1495,7 @@ async function importPkcs8PrivateKey(pem) {
 // ==========================================
 // RBAC & FIRESTORE TRANSACTIONS
 // ==========================================
-async function verifySuperAdminRole(uid, projectId, accessToken) {
+async function verifyManagementRole(uid, projectId, accessToken) {
   const url = `${FIRESTORE_BASE_URL}/${projectId}/databases/(default)/documents/users/${uid}`;
   const resp = await fetch(url, {
     headers: { Authorization: `Bearer ${accessToken}` },
@@ -1510,9 +1510,8 @@ async function verifySuperAdminRole(uid, projectId, accessToken) {
 
   const doc = await resp.json();
   const fields = convertFromFirestoreFields(doc.fields || {});
-
-  if (fields.role !== 'super_admin' || fields.status !== 'active') {
-    throw createHttpError('ليس لديك صلاحية المدير العام (super_admin) أو الحساب غير نشط', 403, 'forbidden');
+  if (!['admin', 'super_admin'].includes(fields.role) || fields.status !== 'active') {
+    throw createHttpError('يلزم حساب مسؤول أو مشرف نشط لتنفيذ هذه العملية', 403, 'forbidden');
   }
 }
 
