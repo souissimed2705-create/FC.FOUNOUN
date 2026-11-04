@@ -67,8 +67,8 @@ export const OperationsPanel: React.FC<Props> = ({ initialSection, admin }) => {
   const refresh = async () => {
     setError(null);
     try {
-      const [w, t, m, c] = await Promise.all([listWorkers(), listTasks(), listShoeModels({ pageSize: 100 }), listMachineCycles()]);
-      const workerData = w.data || [], taskData = t.data || [], modelData = m.models || [], cycleData = c.data || [];
+      const [w, t, m, c] = await Promise.all([listWorkers(), isResponsible ? Promise.resolve({ data: [] as TaskRecord[] }) : listTasks(), listShoeModels({ pageSize: 100 }), listMachineCycles()]);
+      const workerData = w.data || [], taskData = isResponsible ? [] : (t.data || []), modelData = m.models || [], cycleData = c.data || [];
       setCycleNextPageToken(c.nextPageToken || null);
       setWorkers(workerData);
       setWorkerEdits(current => Object.fromEntries(workerData.map(worker => [worker.id, current[worker.id] || { name: worker.name, phone: worker.phone || '', machineNumber: String(worker.machineNumber || ''), shift: worker.shift || 'day' }])));
@@ -92,7 +92,7 @@ export const OperationsPanel: React.FC<Props> = ({ initialSection, admin }) => {
         const workerData = cachedWorkers || [], taskData = cachedTasks || [];
         setWorkers(workerData);
         setWorkerEdits(current => Object.fromEntries(workerData.map(worker => [worker.id, current[worker.id] || { name: worker.name, phone: worker.phone || '', machineNumber: String(worker.machineNumber || ''), shift: worker.shift || 'day' }])));
-        setTasks(taskData); setModels(cachedModels || []); setCycles(cachedCycles || []);
+        setTasks(isResponsible ? [] : taskData); setModels(cachedModels || []); setCycles(cachedCycles || []);
         setNotice('أنت دون اتصال؛ تعرض آخر نسخة محفوظة من بيانات الإدارة. العمليات الجديدة ستنتظر المزامنة.');
       } else {
         setError(e instanceof Error ? e.message : 'تعذر تحميل البيانات ولا توجد نسخة محفوظة.');
@@ -132,7 +132,8 @@ export const OperationsPanel: React.FC<Props> = ({ initialSection, admin }) => {
   const addWorker = (e: React.FormEvent) => {
     e.preventDefault();
     if (!name.trim()) { setError('اسم العامل مطلوب.'); return; }
-    void runMutation(() => createWorker({ name: name.trim(), phone: phone.trim(), machineNumber: Number(machineNumber) as 1 | 2 | 3, shift }), { path: '/api/workers', init: { method: 'POST', body: JSON.stringify({ name: name.trim(), phone: phone.trim(), machineNumber: Number(machineNumber), shift }) } });
+    const payload = { name: name.trim(), ...(!isResponsible ? { phone: phone.trim() } : {}), machineNumber: Number(machineNumber) as 1 | 2 | 3, shift };
+    void runMutation(() => createWorker(payload), { path: '/api/workers', init: { method: 'POST', body: JSON.stringify(payload) } });
     setName(''); setPhone('');
   };
 
@@ -173,7 +174,7 @@ export const OperationsPanel: React.FC<Props> = ({ initialSection, admin }) => {
   }[status]);
   const tabs: { id: Section; label: string }[] = [
     ...(canManageWorkers ? [{ id: 'workers' as const, label: 'إدارة مشرفي العمال' }] : []),
-    { id: 'tasks', label: 'أوامر الإنتاج' },
+    ...(!isResponsible ? [{ id: 'tasks' as const, label: 'أوامر الإنتاج' }] : []),
     { id: 'cycles', label: 'عدد دورات المكائن' },
     { id: 'messages', label: 'المحادثة' },
   ];
@@ -197,7 +198,7 @@ export const OperationsPanel: React.FC<Props> = ({ initialSection, admin }) => {
       <h3 className="font-bold text-[#F5D77F]">إدارة العمال ورموز الدخول</h3>
       <form onSubmit={addWorker} className="grid grid-cols-1 sm:grid-cols-2 gap-2">
         <input className="field" placeholder="اسم العامل" value={name} onChange={e => setName(e.target.value)} />
-        <input className="field" placeholder="الهاتف (اختياري)" value={phone} onChange={e => setPhone(e.target.value)} />
+        {!isResponsible && <input className="field" placeholder="الهاتف (اختياري)" value={phone} onChange={e => setPhone(e.target.value)} />}
         <select className="field" value={machineNumber} onChange={e => setMachineNumber(e.target.value as '1' | '2' | '3')}><option value="1">المكينة 1</option><option value="2">المكينة 2</option><option value="3">المكينة 3</option></select>
         <select className="field" value={shift} onChange={e => setShift(e.target.value as 'day' | 'night')}><option value="day">الوردية النهارية</option><option value="night">الوردية الليلية</option></select>
         <button className="gold-button sm:col-span-2">إضافة مشرف عمال</button>
