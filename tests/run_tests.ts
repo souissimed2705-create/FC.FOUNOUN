@@ -349,7 +349,7 @@ export async function runAllTests() {
   assert(assertManagementAccountUpdateAllowed(
     { role: 'responsible', status: 'inactive', shift: 'day' },
     { status: 'active' },
-    [{ uid: 'mgr_day', role: 'responsible', status: 'active', shift: 'day' }],
+    [],
     'mgr_old', 'mgr_super'
   ) === true, 'السماح بإعادة تفعيل مسؤول إذا كانت ورديته غير مشغولة');
   assertThrowsWithCode(
