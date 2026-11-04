@@ -368,7 +368,39 @@ async function handleUpdateResource(request, resource, id, callerUid, projectId,
   const currentDoc = await getFirestoreDoc(projectId, accessToken, `${resource}/${id}`);
   if (!currentDoc) throw createHttpError('المورد المطلوب غير موجود', 404, 'resource_not_found');
   const current = convertFromFirestoreFields(currentDoc.fields || {});
-  const record = { ...current, ...payload, updatedBy: callerUid, updatedAt: new Date().toISOString() };
+  const changes = { ...payload };
+
+  if (resource === 'tasks') {
+    if (Object.prototype.hasOwnProperty.call(changes, 'completedQuantity')) {
+      throw createHttpError('لا يمكن تعديل الكمية المنجزة مباشرة؛ تُسجّل عبر سجل الإنجاز فقط', 400, 'completed_quantity_read_only');
+    }
+    if (changes.targetQuantity !== undefined &&
+      (!Number.isSafeInteger(changes.targetQuantity) || changes.targetQuantity < Math.max(1, Number(current.completedQuantity || 0)))) {
+      throw createHttpError('الكمية المطلوبة لا يمكن أن تقل عن الكمية المنجزة بالفعل', 400, 'invalid_target_quantity');
+    }
+    // These display fields are always resolved by the server, never trusted from the browser.
+    delete changes.modelName;
+    delete changes.modelCategory;
+    delete changes.assignedWorkerName;
+
+    if (changes.assignedWorkerId !== undefined) {
+      const assignedWorkerDoc = await getFirestoreDoc(projectId, accessToken, `workers/${changes.assignedWorkerId}`);
+      if (!assignedWorkerDoc) throw createHttpError('العامل المحدد غير موجود', 404, 'worker_not_found');
+      const assignedWorker = convertFromFirestoreFields(assignedWorkerDoc.fields || {});
+      if (assignedWorker.status !== 'active') throw createHttpError('لا يمكن إسناد المهمة إلى عامل غير نشط', 409, 'worker_inactive');
+      changes.assignedWorkerName = assignedWorker.name;
+    }
+    if (changes.modelId !== undefined) {
+      const modelDoc = await getFirestoreDoc(projectId, accessToken, `models/${changes.modelId}`);
+      if (!modelDoc) throw createHttpError('المودال المحدد غير موجود في الكتالوج', 404, 'model_not_found');
+      const model = convertFromFirestoreFields(modelDoc.fields || {});
+      changes.modelName = model.name;
+      changes.modelCategory = model.category;
+      changes.title = `إنتاج مودال ${model.name}`;
+    }
+  }
+
+  const record = { ...current, ...changes, updatedBy: callerUid, updatedAt: new Date().toISOString() };
   const write = { update: { name: `projects/${projectId}/databases/(default)/documents/${resource}/${id}`, fields: convertToFirestoreFields(record) }, currentDocument: { updateTime: currentDoc.updateTime } };
   await commitFirestoreTransaction(projectId, accessToken, null, [write]);
   return jsonResponse({ success: true, [resource === 'workers' ? 'worker' : 'task']: sanitizeResourceOutput(record, resource) }, 200, corsHeaders);
