@@ -82,23 +82,26 @@ export default {
     const workerProgressRoute = workerProgressMatch && request.method === 'POST';
     const workerTaskStatusMatch = cleanPath.match(/^\/api\/worker\/tasks\/([^/]+)\/status$/);
     const workerTaskStatusRoute = workerTaskStatusMatch && request.method === 'PUT';
-    const workerMessagesRoute = cleanPath === '/api/worker/messages' && ['GET', 'POST'].includes(request.method);
+    const workerMessagesRoute = false; // Legacy shared worker-admin chat is disabled; use participant-only direct messages.
+    const adminMessagesRoute = false;
+    const contactsRoute = cleanPath === '/api/contacts' && request.method === 'GET';
+    const directMessagesMatch = cleanPath.match(/^\/api\/direct-messages\/([^/]+)$/);
+    const directMessagesRoute = directMessagesMatch && ['GET', 'POST'].includes(request.method);
     const workerCyclesRoute = cleanPath === '/api/worker/cycles' && ['GET', 'POST'].includes(request.method);
     const managementCyclesRoute = cleanPath === '/api/cycles' && request.method === 'GET';
     const cyclePhotoMatch = cleanPath.match(/^\/api\/cycles\/([^/]+)\/photo$/);
     const managementCyclePhotoRoute = cyclePhotoMatch && request.method === 'GET';
-    const adminMessagesRoute = cleanPath === '/api/messages' && ['GET', 'POST'].includes(request.method);
     if (managementRoute?.error) {
       return jsonResponse({ success: false, error: managementRoute.error.message, code: managementRoute.error.code }, 400, corsHeaders);
     }
-    if (!managementRoute && !workerLoginRoute && !managementLoginRoute && !managementAccountsRoute && !managementAccountActionRoute && !workerTasksRoute && !workerProgressRoute && !workerTaskStatusRoute && !workerMessagesRoute && !workerCyclesRoute && !managementCyclesRoute && !managementCyclePhotoRoute && !adminMessagesRoute && !cleanPath.startsWith('/api/models')) {
+    if (!managementRoute && !workerLoginRoute && !managementLoginRoute && !managementAccountsRoute && !managementAccountActionRoute && !workerTasksRoute && !workerProgressRoute && !workerTaskStatusRoute && !workerMessagesRoute && !contactsRoute && !directMessagesRoute && !workerCyclesRoute && !managementCyclesRoute && !managementCyclePhotoRoute && !adminMessagesRoute && !cleanPath.startsWith('/api/models')) {
       return jsonResponse({ success: false, error: 'المسار المطلوب غير موجود', code: 'not_found' }, 404, corsHeaders);
     }
 
     let modelIdParam = null;
     const modelsPrefix = '/api/models';
 
-    if (managementRoute || workerLoginRoute || managementLoginRoute || managementAccountsRoute || managementAccountActionRoute || workerTasksRoute || workerProgressRoute || workerTaskStatusRoute || workerMessagesRoute || workerCyclesRoute || managementCyclesRoute || managementCyclePhotoRoute || adminMessagesRoute) {
+    if (managementRoute || workerLoginRoute || managementLoginRoute || managementAccountsRoute || managementAccountActionRoute || workerTasksRoute || workerProgressRoute || workerTaskStatusRoute || workerMessagesRoute || contactsRoute || directMessagesRoute || workerCyclesRoute || managementCyclesRoute || managementCyclePhotoRoute || adminMessagesRoute) {
       // Validated API routes are dispatched after authentication.
     } else if (cleanPath === modelsPrefix) {
       if (request.method !== 'GET' && request.method !== 'POST') {
@@ -174,6 +177,18 @@ export default {
       const callerUid = decodedToken.sub;
 
       const saAccessToken = await getServiceAccountAccessToken(serviceAccount);
+      if (contactsRoute || directMessagesRoute) {
+        let callerRole;
+        if (decodedToken.role === 'worker' && decodedToken.workerId === callerUid) {
+          const workerDoc = await getFirestoreDoc(projectId, saAccessToken, `workers/${callerUid}`);
+          if (!workerDoc || convertFromFirestoreFields(workerDoc.fields || {}).status !== 'active') throw createHttpError('حساب مشرف العمال غير نشط', 403, 'worker_inactive');
+          callerRole = 'worker';
+        } else {
+          callerRole = await verifyManagementRole(callerUid, projectId, saAccessToken);
+        }
+        if (contactsRoute) return await handleListContacts(callerUid, projectId, saAccessToken, corsHeaders);
+        return await handleDirectMessages(request, safeDecodeUriSegment(directMessagesMatch[1]), callerUid, callerRole, projectId, saAccessToken, corsHeaders);
+      }
       if (workerTasksRoute || workerProgressRoute || workerTaskStatusRoute || workerMessagesRoute || workerCyclesRoute) {
         if (decodedToken.role !== 'worker' || decodedToken.workerId !== callerUid) {
           throw createHttpError('هذه الخدمة مخصصة لحساب العامل فقط', 403, 'worker_only');
@@ -813,6 +828,108 @@ async function handleWorkerMessages(request, workerId, projectId, accessToken, c
   return jsonResponse({ success: true, data: message }, 201, corsHeaders);
 }
 
+
+
+async function getActiveContact(uid, projectId, accessToken) {
+  const userDoc = await getFirestoreDoc(projectId, accessToken, `users/${uid}`);
+  if (userDoc) {
+    const user = convertFromFirestoreFields(userDoc.fields || {});
+    if (user.status !== 'active' || !['super_admin', 'admin', 'responsible'].includes(user.role)) return null;
+    return { uid, displayName: String(user.displayName || user.name || user.email || 'مستخدم').slice(0, 80), role: user.role, status: user.status };
+  }
+  const workerDoc = await getFirestoreDoc(projectId, accessToken, `workers/${uid}`);
+  if (workerDoc) {
+    const worker = convertFromFirestoreFields(workerDoc.fields || {});
+    if (worker.status !== 'active') return null;
+    return { uid, displayName: String(worker.name || 'مشرف العمال').slice(0, 80), role: 'worker', status: worker.status };
+  }
+  return null;
+}
+
+async function buildDirectConversationId(uidA, uidB) {
+  const pair = [uidA, uidB].sort();
+  const digest = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(pair.join(':')));
+  return `conv_${bytesToBase64Url(new Uint8Array(digest))}`;
+}
+
+async function handleListContacts(callerUid, projectId, accessToken, corsHeaders) {
+  const [usersResult, workersResult] = await Promise.all([
+    listFirestoreDocs(projectId, accessToken, 'users', 100),
+    listFirestoreDocs(projectId, accessToken, 'workers', 100)
+  ]);
+  const users = usersResult.documents.map(doc => convertFromFirestoreFields(doc.fields || {}))
+    .filter(user => user.status === 'active' && ['super_admin', 'admin', 'responsible'].includes(user.role) && (user.uid || user.id) !== callerUid)
+    .map(user => ({ uid: user.uid || user.id, name: String(user.displayName || user.name || 'مستخدم').slice(0, 80), role: user.role }));
+  const workers = workersResult.documents.map(doc => convertFromFirestoreFields(doc.fields || {}))
+    .filter(worker => worker.status === 'active' && worker.id !== callerUid)
+    .map(worker => ({ uid: worker.id, name: String(worker.name || 'مشرف العمال').slice(0, 80), role: 'worker' }));
+  const contacts = [...users, ...workers].sort((a, b) => a.name.localeCompare(b.name, 'ar'));
+  return jsonResponse({ success: true, data: contacts }, 200, corsHeaders);
+}
+
+async function readDirectConversation(conversationId, projectId, accessToken) {
+  const url = `${FIRESTORE_BASE_URL}/${projectId}/databases/(default)/documents:runQuery`;
+  const response = await fetch(url, {
+    method: 'POST',
+    headers: { Authorization: `Bearer ${accessToken}`, 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      structuredQuery: {
+        from: [{ collectionId: 'messages' }],
+        where: { fieldFilter: { field: { fieldPath: 'conversationId' }, op: 'EQUAL', value: { stringValue: conversationId } } },
+        limit: 100
+      }
+    })
+  });
+  if (!response.ok) throw createHttpError('تعذر تحميل المحادثة الخاصة', 500, 'direct_messages_read_failed');
+  const rows = await response.json();
+  return rows.filter(row => row.document).map(row => convertFromFirestoreFields(row.document.fields || {}))
+    .sort((a, b) => String(a.createdAt || '').localeCompare(String(b.createdAt || '')));
+}
+
+async function handleDirectMessages(request, otherUid, callerUid, callerRole, projectId, accessToken, corsHeaders) {
+  if (!/^[A-Za-z0-9_-]{3,128}$/.test(otherUid) || otherUid === callerUid) throw createHttpError('اختر مستخدماً آخر صالحاً لبدء المحادثة', 400, 'invalid_direct_recipient');
+  const [sender, recipient] = await Promise.all([
+    getActiveContact(callerUid, projectId, accessToken),
+    getActiveContact(otherUid, projectId, accessToken)
+  ]);
+  if (!sender) throw createHttpError('حسابك غير نشط أو غير موجود', 403, 'sender_inactive');
+  if (!recipient) throw createHttpError('المستخدم المطلوب غير موجود أو غير نشط', 404, 'recipient_unavailable');
+  const conversationId = await buildDirectConversationId(callerUid, otherUid);
+  const conversationPath = `conversations/${conversationId}`;
+  const conversationDoc = await getFirestoreDoc(projectId, accessToken, conversationPath);
+  if (request.method === 'GET') {
+    if (!conversationDoc) return jsonResponse({ success: true, data: [] }, 200, corsHeaders);
+    const conversation = convertFromFirestoreFields(conversationDoc.fields || {});
+    if (!Array.isArray(conversation.participants) || !conversation.participants.includes(callerUid) || !conversation.participants.includes(otherUid) || conversation.participants.length !== 2) {
+      throw createHttpError('لا تملك صلاحية الاطلاع على هذه المحادثة', 403, 'direct_conversation_forbidden');
+    }
+    const messages = await readDirectConversation(conversationId, projectId, accessToken);
+    return jsonResponse({ success: true, data: messages }, 200, corsHeaders);
+  }
+  const payload = await parseJsonBody(request);
+  const cleanText = typeof payload?.text === 'string' ? payload.text.trim() : '';
+  if (!cleanText || cleanText.length > 2000) throw createHttpError('اكتب رسالة لا تتجاوز 2000 حرف', 400, 'invalid_message');
+  const now = new Date().toISOString();
+  const messageId = `dm_${crypto.randomUUID().replace(/-/g, '')}`;
+  const conversation = {
+    id: conversationId,
+    participants: [callerUid, otherUid].sort(),
+    createdAt: conversationDoc ? convertFromFirestoreFields(conversationDoc.fields || {}).createdAt : now,
+    updatedAt: now,
+    lastMessageAt: now
+  };
+  const message = {
+    id: messageId, conversationId, participants: conversation.participants,
+    senderUid: callerUid, recipientUid: otherUid, senderRole: callerRole,
+    senderName: sender.displayName, recipientName: recipient.displayName,
+    text: cleanText, createdAt: now
+  };
+  const conversationWrite = { update: { name: `projects/${projectId}/databases/(default)/documents/${conversationPath}`, fields: convertToFirestoreFields(conversation) } };
+  conversationWrite.currentDocument = conversationDoc?.updateTime ? { updateTime: conversationDoc.updateTime } : { exists: false };
+  const messageWrite = { update: { name: `projects/${projectId}/databases/(default)/documents/messages/${messageId}`, fields: convertToFirestoreFields(message) }, currentDocument: { exists: false } };
+  await commitFirestoreTransaction(projectId, accessToken, null, [conversationWrite, messageWrite]);
+  return jsonResponse({ success: true, data: message }, 201, corsHeaders);
+}
 
 async function handleWorkerCycles(request, workerId, projectId, accessToken, corsHeaders) {
   const workerDoc = await getFirestoreDoc(projectId, accessToken, `workers/${workerId}`);
