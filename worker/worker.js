@@ -392,7 +392,7 @@ async function handleListResource(request, resource, projectId, accessToken, cor
   const pageSize = Number.isInteger(requested) ? Math.min(Math.max(requested, 1), 100) : 50;
   const result = await listAllFirestoreDocs(projectId, accessToken, resource, 100, 500);
   const records = result.documents.map((doc) => sanitizeResourceOutput(convertFromFirestoreFields(doc.fields || {}), resource));
-  const visibleRecords = resource === 'workers' && callerRole !== 'super_admin'
+  const visibleRecords = resource === 'workers' && callerRole === 'responsible'
     ? records.map(worker => ({ id: worker.id, name: worker.name, status: worker.status, machineNumber: worker.machineNumber, shift: worker.shift }))
     : records;
   return jsonResponse({ success: true, [resource]: visibleRecords, nextPageToken: result.nextPageToken }, 200, corsHeaders);
