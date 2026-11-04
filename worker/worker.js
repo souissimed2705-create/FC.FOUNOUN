@@ -86,8 +86,8 @@ export default {
     let modelIdParam = null;
     const modelsPrefix = '/api/models';
 
-    if (managementRoute) {
-      // Validated by parseManagementRoute; no nested or ambiguous paths reach handlers.
+    if (managementRoute || workerLoginRoute || workerTasksRoute || workerProgressRoute) {
+      // Validated API routes are dispatched after authentication.
     } else if (cleanPath === modelsPrefix) {
       if (request.method !== 'GET' && request.method !== 'POST') {
         return jsonResponse(
@@ -423,6 +423,10 @@ async function createFirebaseCustomToken(env, uid, workerName) {
 }
 
 async function handleWorkerListTasks(workerId, projectId, accessToken, corsHeaders) {
+  const workerDoc = await getFirestoreDoc(projectId, accessToken, `workers/${workerId}`);
+  if (!workerDoc || convertFromFirestoreFields(workerDoc.fields || {}).status !== 'active') {
+    throw createHttpError('حساب العامل غير نشط', 403, 'worker_inactive');
+  }
   const result = await listFirestoreDocs(projectId, accessToken, 'tasks', 100);
   const tasks = result.documents
     .map(doc => convertFromFirestoreFields(doc.fields || {}))
@@ -432,6 +436,10 @@ async function handleWorkerListTasks(workerId, projectId, accessToken, corsHeade
 }
 
 async function handleWorkerTaskProgress(request, taskId, workerId, projectId, accessToken, corsHeaders) {
+  const workerDoc = await getFirestoreDoc(projectId, accessToken, `workers/${workerId}`);
+  if (!workerDoc || convertFromFirestoreFields(workerDoc.fields || {}).status !== 'active') {
+    throw createHttpError('حساب العامل غير نشط', 403, 'worker_inactive');
+  }
   const taskDoc = await getFirestoreDoc(projectId, accessToken, `tasks/${taskId}`);
   if (!taskDoc) throw createHttpError('المهمة غير موجودة', 404, 'task_not_found');
   const task = convertFromFirestoreFields(taskDoc.fields || {});
