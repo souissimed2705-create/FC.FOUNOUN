@@ -269,7 +269,7 @@ async function dispatchManagementRoute(request, route, callerUid, projectId, acc
 
 const RESOURCE_FIELDS = {
   workers: ['name', 'phone', 'email', 'status', 'notes', 'role'],
-  tasks: ['title', 'description', 'status', 'priority', 'assignedWorkerId', 'assignedWorkerName', 'modelId', 'modelName', 'targetQuantity', 'completedQuantity', 'dueDate'],
+  tasks: ['title', 'description', 'status', 'priority', 'assignedWorkerId', 'assignedWorkerName', 'modelId', 'modelName', 'modelCategory', 'targetQuantity', 'completedQuantity', 'dueDate'],
 };
 
 function validateResourcePayload(payload, resource, isCreate) {
@@ -444,8 +444,7 @@ async function readConversation(workerId, projectId, accessToken) {
             value: { stringValue: workerId }
           }
         },
-        orderBy: [{ field: { fieldPath: 'createdAt' }, direction: 'DESCENDING' }],
-        limit: 100
+        limit: 1000
       }
     })
   });
@@ -455,7 +454,7 @@ async function readConversation(workerId, projectId, accessToken) {
     const message = convertFromFirestoreFields(row.document.fields || {});
     message.id = message.id || String(row.document.name || '').split('/').pop();
     return message;
-  }).sort((a, b) => String(a.createdAt || '').localeCompare(String(b.createdAt || '')));
+  }).sort((a, b) => String(a.createdAt || '').localeCompare(String(b.createdAt || ''))).slice(-100);
 }
 
 async function saveConversationMessage(workerId, senderUid, senderRole, senderName, text, projectId, accessToken) {
