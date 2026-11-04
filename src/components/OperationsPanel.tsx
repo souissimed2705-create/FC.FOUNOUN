@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { MessageCircle, Gauge } from 'lucide-react';
-import { createTask, createWorker, flushQueuedMutations, listConversation, listTasks, listWorkers, queuedMutationCount, recordProgress, sendManagementMessage, setWorkerPin, updateTask, updateWorker, listMachineCycles } from '../lib/operationsApi';
+import { createTask, createWorker, flushQueuedMutations, listConversation, listTasks, listWorkers, queuedMutationCount, recordProgress, sendManagementMessage, setWorkerPin, updateTask, updateWorker, listMachineCycles, getMachineCyclePhoto } from '../lib/operationsApi';
 import { listShoeModels } from '../lib/modelsApi';
 import type { ShoeModel } from '../types/models';
 import type { ChatMessage, TaskRecord, WorkerRecord, MachineCycleRecord } from '../types/operations';
@@ -20,6 +20,7 @@ export const OperationsPanel: React.FC<Props> = ({ initialSection, admin }) => {
   const [machineNumber, setMachineNumber] = useState<'1' | '2' | '3'>('1');
   const [shift, setShift] = useState<'day' | 'night'>('day');
   const [cycles, setCycles] = useState<MachineCycleRecord[]>([]);
+  const [selectedCyclePhoto, setSelectedCyclePhoto] = useState<{ id: string; photo: string } | null>(null);
   const [workerEdits, setWorkerEdits] = useState<Record<string, { name: string; phone: string }>>({});
   const [pinId, setPinId] = useState('');
   const [pin, setPin] = useState('');
@@ -230,8 +231,10 @@ export const OperationsPanel: React.FC<Props> = ({ initialSection, admin }) => {
       <div className="flex items-center gap-2"><Gauge className="h-5 w-5 text-[#D4AF37]" /><h3 className="font-bold text-[#F5D77F]">تقارير عدد دورات المكائن</h3></div>
       <p className="text-xs leading-6 text-gray-400">تُعرض تقارير كل مكينة ووردية بصورة مستقلة. لا يتم جمع دورات النهار مع الليل.</p>
       {!cycles.length && <p className="rounded-xl border border-white/10 bg-[#080808] p-6 text-center text-sm text-gray-500">لا توجد تقارير دورات مسجلة.</p>}
-      {cycles.map(report => <article key={report.id} className="rounded-xl border border-white/10 bg-[#080808] p-3"><div className="flex flex-wrap items-center justify-between gap-2"><b>المكينة {report.machineNumber} · {report.shift === 'day' ? 'النهار' : 'الليل'}</b><strong className="text-[#F5D77F]">{report.count.toLocaleString('ar-TN')} دورة</strong></div><p className="mt-1 text-xs text-gray-400">{report.date} · {new Date(report.recordedAt).toLocaleString('ar-TN')} · {report.workerName}</p><p className="mt-1 text-xs text-gray-500">{report.hasPhoto ? 'صورة العداد محفوظة' : 'لا توجد صورة مرفقة'}</p></article>)}
+      {cycles.map(report => <article key={report.id} className="rounded-xl border border-white/10 bg-[#080808] p-3"><div className="flex flex-wrap items-center justify-between gap-2"><b>المكينة {report.machineNumber} · {report.shift === 'day' ? 'النهار' : 'الليل'}</b><strong className="text-[#F5D77F]">{report.count.toLocaleString('ar-TN')} دورة</strong></div><p className="mt-1 text-xs text-gray-400">{report.date} · {new Date(report.recordedAt).toLocaleString('ar-TN')} · {report.workerName}</p><p className="mt-1 text-xs text-gray-500">{report.hasPhoto ? <button className="secondary-button mt-2" onClick={async () => { try { const result = await getMachineCyclePhoto(report.id); setSelectedCyclePhoto(result.data); } catch (e) { setError(e instanceof Error ? e.message : 'تعذر عرض صورة العداد.'); } }}>عرض صورة العداد</button> : 'لا توجد صورة مرفقة'}</p></article>)}
     </div>}
+
+    {selectedCyclePhoto && <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/90 p-4" role="dialog" aria-modal="true" aria-label="صورة عداد المكينة" onClick={() => setSelectedCyclePhoto(null)}><div className="max-h-[90vh] max-w-3xl rounded-xl border border-[#D4AF37]/40 bg-[#111] p-3" onClick={e => e.stopPropagation()}><div className="mb-2 flex justify-between"><b className="text-[#F5D77F]">صورة عداد المكينة</b><button className="secondary-button" onClick={() => setSelectedCyclePhoto(null)}>إغلاق</button></div><img src={selectedCyclePhoto.photo} alt="صورة عداد المكينة" className="max-h-[78vh] w-auto rounded-lg object-contain" /></div></div>}
 
     {section === 'messages' && <div className="space-y-3">
       <h3 className="font-bold text-[#F5D77F]">المحادثات الخاصة مع العمال</h3>
