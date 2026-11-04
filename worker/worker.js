@@ -88,7 +88,7 @@ export default {
     let modelIdParam = null;
     const modelsPrefix = '/api/models';
 
-    if (managementRoute || workerLoginRoute || workerTasksRoute || workerProgressRoute) {
+    if (managementRoute || workerLoginRoute || workerTasksRoute || workerProgressRoute || workerMessagesRoute || adminMessagesRoute) {
       // Validated API routes are dispatched after authentication.
     } else if (cleanPath === modelsPrefix) {
       if (request.method !== 'GET' && request.method !== 'POST') {
