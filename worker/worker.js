@@ -358,6 +358,14 @@ async function handleListResource(request, resource, projectId, accessToken, cor
 async function handleCreateResource(request, resource, callerUid, projectId, accessToken, corsHeaders) {
   const payload = await parseJsonBody(request);
   validateResourcePayload(payload, resource, true);
+  if (resource === 'workers') {
+    if (![1, 2, 3].includes(payload.machineNumber) || !['day', 'night'].includes(payload.shift)) throw createHttpError('يجب تعيين كل مشرف عمال إلى مكينة ووردية محددتين', 400, 'worker_assignment_required');
+    if (payload.status !== 'inactive') {
+      const existingWorkers = await listFirestoreDocs(projectId, accessToken, 'workers', 100);
+      const occupied = existingWorkers.documents.map(doc => convertFromFirestoreFields(doc.fields || {})).some(worker => worker.status === 'active' && worker.machineNumber === payload.machineNumber && worker.shift === payload.shift);
+      if (occupied) throw createHttpError('هذه المكينة والوردية مرتبطتان بالفعل بمشرف عمال نشط', 409, 'machine_shift_already_assigned');
+    }
+  }
   const id = `${resource === 'workers' ? 'wkr' : 'tsk'}_${crypto.randomUUID().replace(/-/g, '')}`;
   const now = new Date().toISOString();
   const defaults = resource === 'workers' ? { status: 'active' } : { status: 'open', completedQuantity: 0 };
@@ -386,6 +394,17 @@ async function handleUpdateResource(request, resource, id, callerUid, projectId,
   if (!currentDoc) throw createHttpError('المورد المطلوب غير موجود', 404, 'resource_not_found');
   const current = convertFromFirestoreFields(currentDoc.fields || {});
   const changes = { ...payload };
+
+  if (resource === 'workers' && (changes.machineNumber !== undefined || changes.shift !== undefined || changes.status === 'active')) {
+    const targetMachine = changes.machineNumber ?? current.machineNumber;
+    const targetShift = changes.shift ?? current.shift;
+    if (![1, 2, 3].includes(targetMachine) || !['day', 'night'].includes(targetShift)) throw createHttpError('يجب تعيين المكينة والوردية معاً', 400, 'worker_assignment_required');
+    if ((changes.status ?? current.status) === 'active') {
+      const existingWorkers = await listFirestoreDocs(projectId, accessToken, 'workers', 100);
+      const occupied = existingWorkers.documents.map(doc => convertFromFirestoreFields(doc.fields || {})).some(worker => worker.id !== id && worker.status === 'active' && worker.machineNumber === targetMachine && worker.shift === targetShift);
+      if (occupied) throw createHttpError('هذه المكينة والوردية مرتبطتان بالفعل بمشرف عمال نشط', 409, 'machine_shift_already_assigned');
+    }
+  }
 
   if (resource === 'tasks') {
     if (Object.prototype.hasOwnProperty.call(changes, 'completedQuantity')) {
