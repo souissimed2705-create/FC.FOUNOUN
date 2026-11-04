@@ -397,6 +397,9 @@ async function handleCreateResource(request, resource, callerUid, projectId, acc
   const payload = await parseJsonBody(request);
   validateResourcePayload(payload, resource, true);
   if (resource === 'workers') {
+    const existingWorkers = await listFirestoreDocs(projectId, accessToken, 'workers', 100);
+    const duplicateName = existingWorkers.documents.map(doc => convertFromFirestoreFields(doc.fields || {})).some(worker => worker.status === 'active' && String(worker.name || '').trim().toLocaleLowerCase() === payload.name.trim().toLocaleLowerCase());
+    if (duplicateName) throw createHttpError('اسم مشرف العمال مستخدم بالفعل؛ اختر اسماً مميزاً لتسجيل الدخول به', 409, 'worker_name_taken');
     if (![1, 2, 3].includes(payload.machineNumber) || !['day', 'night'].includes(payload.shift)) throw createHttpError('يجب تعيين كل مشرف عمال إلى مكينة ووردية محددتين', 400, 'worker_assignment_required');
     if (payload.status !== 'inactive') {
       const existingWorkers = await listFirestoreDocs(projectId, accessToken, 'workers', 100);
@@ -436,6 +439,11 @@ async function handleUpdateResource(request, resource, id, callerUid, projectId,
   const current = convertFromFirestoreFields(currentDoc.fields || {});
   const changes = { ...payload };
 
+  if (resource === 'workers' && changes.name !== undefined && (changes.status ?? current.status) === 'active') {
+    const existingWorkers = await listFirestoreDocs(projectId, accessToken, 'workers', 100);
+    const duplicateName = existingWorkers.documents.map(doc => convertFromFirestoreFields(doc.fields || {})).some(worker => worker.id !== id && worker.status === 'active' && String(worker.name || '').trim().toLocaleLowerCase() === changes.name.trim().toLocaleLowerCase());
+    if (duplicateName) throw createHttpError('اسم مشرف العمال مستخدم بالفعل؛ اختر اسماً مميزاً لتسجيل الدخول به', 409, 'worker_name_taken');
+  }
   if (resource === 'workers' && (changes.machineNumber !== undefined || changes.shift !== undefined || changes.status === 'active')) {
     const targetMachine = changes.machineNumber ?? current.machineNumber;
     const targetShift = changes.shift ?? current.shift;
