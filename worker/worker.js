@@ -217,9 +217,7 @@ export default {
       if (managementRoute?.resource === 'workers') {
         assertWorkerManagementPermission(callerRole, request.method, managementRoute.action);
       }
-      if (callerRole === 'responsible' && !managementRoute && !adminMessagesRoute && !managementCyclesRoute && !managementCyclePhotoRoute && cleanPath.startsWith('/api/models') && request.method !== 'GET') {
-        throw createHttpError('المسؤول لا يملك صلاحية إضافة الموديلات أو تعديلها أو حذفها', 403, 'responsible_model_write_forbidden');
-      }
+      
       if (managementAccountsRoute || managementAccountActionRoute) {
         if (callerRole !== 'super_admin') throw createHttpError('إدارة حسابات المديرين والمسؤولين من صلاحيات المشرف العام فقط', 403, 'super_admin_only_management_accounts');
         if (managementAccountsRoute && request.method === 'GET') return await handleListManagementAccounts(projectId, saAccessToken, corsHeaders);
@@ -435,9 +433,7 @@ async function handleCreateResource(request, resource, callerUid, projectId, acc
 async function handleUpdateResource(request, resource, id, callerUid, projectId, accessToken, corsHeaders, callerRole = null) {
   const payload = await parseJsonBody(request);
   validateResourcePayload(payload, resource, false);
-  if (resource === 'workers' && callerRole === 'responsible' && Object.keys(payload || {}).some(key => key !== 'name')) {
-    throw createHttpError('المسؤول يستطيع تعديل اسم مشرف العمال فقط؛ لا يمكنه تغيير المكينة أو الوردية أو حالة الحساب', 403, 'responsible_worker_edit_limited');
-  }
+  
   const currentDoc = await getFirestoreDoc(projectId, accessToken, `${resource}/${id}`);
   if (!currentDoc) throw createHttpError('المورد المطلوب غير موجود', 404, 'resource_not_found');
   const current = convertFromFirestoreFields(currentDoc.fields || {});
@@ -521,7 +517,7 @@ async function handleUpdateTaskCollection(request, callerUid, projectId, accessT
 export function assertWorkerManagementPermission(role, method, action = null) {
   if (role === 'super_admin') return true;
   if (role === 'admin' && ['GET', 'POST', 'PUT', 'DELETE'].includes(method)) return true;
-  if (role === 'responsible' && (method === 'GET' || (method === 'PUT' && (action === null || action === 'pin')))) return true;
+  if (role === 'responsible' && ['GET', 'POST', 'PUT', 'DELETE'].includes(method)) return true;
   throw createHttpError('لا تملك صلاحية تنفيذ هذه العملية على حسابات مشرفي العمال', 403, 'worker_management_forbidden');
 }
 
