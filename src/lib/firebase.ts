@@ -119,6 +119,31 @@ export async function verifySuperAdmin(uid: string): Promise<UserProfile> {
   };
 }
 
+
+/**
+ * Verifies that an authenticated management account is active.
+ * Both admin and super_admin may use the management workspace;
+ * super_admin-only actions must be checked separately by the backend.
+ */
+export async function verifyAdmin(uid: string): Promise<UserProfile> {
+  const userDocRef = doc(db, 'users', uid);
+  const docSnap = await getDoc(userDocRef);
+  if (!docSnap.exists()) throw new Error('NO_DOCUMENT');
+  const data = docSnap.data();
+  if (!data || !['admin', 'super_admin'].includes(data.role)) {
+    throw new Error('UNAUTHORIZED_ROLE');
+  }
+  if (data.status !== 'active') throw new Error('INACTIVE_ACCOUNT');
+  return {
+    uid,
+    email: data.email || '',
+    role: data.role,
+    status: data.status,
+    displayName: data.displayName || (data.role === 'super_admin' ? 'المشرف' : 'المسؤول'),
+    createdAt: data.createdAt,
+  };
+}
+
 /**
  * Maps Firebase Auth error codes to user-friendly Arabic error messages.
  * Does NOT expose sensitive security information.
