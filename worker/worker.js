@@ -81,18 +81,20 @@ export default {
     const workerMessagesRoute = cleanPath === '/api/worker/messages' && ['GET', 'POST'].includes(request.method);
     const workerCyclesRoute = cleanPath === '/api/worker/cycles' && ['GET', 'POST'].includes(request.method);
     const managementCyclesRoute = cleanPath === '/api/cycles' && request.method === 'GET';
+    const cyclePhotoMatch = cleanPath.match(/^\/api\/cycles\/([^/]+)\/photo$/);
+    const managementCyclePhotoRoute = cyclePhotoMatch && request.method === 'GET';
     const adminMessagesRoute = cleanPath === '/api/messages' && ['GET', 'POST'].includes(request.method);
     if (managementRoute?.error) {
       return jsonResponse({ success: false, error: managementRoute.error.message, code: managementRoute.error.code }, 400, corsHeaders);
     }
-    if (!managementRoute && !workerLoginRoute && !workerTasksRoute && !workerProgressRoute && !workerTaskStatusRoute && !workerMessagesRoute && !workerCyclesRoute && !managementCyclesRoute && !adminMessagesRoute && !cleanPath.startsWith('/api/models')) {
+    if (!managementRoute && !workerLoginRoute && !workerTasksRoute && !workerProgressRoute && !workerTaskStatusRoute && !workerMessagesRoute && !workerCyclesRoute && !managementCyclesRoute && !managementCyclePhotoRoute && !adminMessagesRoute && !cleanPath.startsWith('/api/models')) {
       return jsonResponse({ success: false, error: 'المسار المطلوب غير موجود', code: 'not_found' }, 404, corsHeaders);
     }
 
     let modelIdParam = null;
     const modelsPrefix = '/api/models';
 
-    if (managementRoute || workerLoginRoute || workerTasksRoute || workerProgressRoute || workerTaskStatusRoute || workerMessagesRoute || workerCyclesRoute || managementCyclesRoute || adminMessagesRoute) {
+    if (managementRoute || workerLoginRoute || workerTasksRoute || workerProgressRoute || workerTaskStatusRoute || workerMessagesRoute || workerCyclesRoute || managementCyclesRoute || managementCyclePhotoRoute || adminMessagesRoute) {
       // Validated API routes are dispatched after authentication.
     } else if (cleanPath === modelsPrefix) {
       if (request.method !== 'GET' && request.method !== 'POST') {
@@ -188,6 +190,7 @@ export default {
       }
       if (adminMessagesRoute) return await handleManagementMessages(request, callerUid, callerRole, projectId, saAccessToken, corsHeaders);
       if (managementCyclesRoute) return await handleListCycles(request, projectId, saAccessToken, corsHeaders);
+      if (managementCyclePhotoRoute) return await handleCyclePhoto(safeDecodeUriSegment(cyclePhotoMatch[1]), projectId, saAccessToken, corsHeaders);
 
       // 5. Dispatch Route Handlers
       if (managementRoute) {
@@ -665,6 +668,16 @@ async function handleWorkerCycles(request, workerId, projectId, accessToken, cor
   };
   await commitFirestoreTransaction(projectId, accessToken, null, [write]);
   return jsonResponse({ success: true, data: { ...record, photo: undefined } }, existing ? 200 : 201, corsHeaders);
+}
+
+
+async function handleCyclePhoto(id, projectId, accessToken, corsHeaders) {
+  if (!/^mc_[0-9]{8}_[123]_(?:day|night)$/.test(id)) throw createHttpError('معرّف تقرير الدورات غير صالح', 400, 'invalid_cycle_id');
+  const doc = await getFirestoreDoc(projectId, accessToken, `machine_cycles/${id}`);
+  if (!doc) throw createHttpError('تقرير الدورات غير موجود', 404, 'cycle_report_not_found');
+  const record = convertFromFirestoreFields(doc.fields || {});
+  if (typeof record.photo !== 'string' || !record.photo.startsWith('data:image/')) throw createHttpError('صورة العداد غير متوفرة', 404, 'cycle_photo_not_found');
+  return jsonResponse({ success: true, data: { id, photo: record.photo } }, 200, corsHeaders);
 }
 
 async function handleListCycles(request, projectId, accessToken, corsHeaders) {
