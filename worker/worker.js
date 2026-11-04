@@ -304,7 +304,7 @@ async function dispatchManagementRoute(request, route, callerUid, callerRole, pr
   }
   if (route.resource === 'workers') {
     if (request.method === 'GET') return handleListResource(request, 'workers', projectId, accessToken, corsHeaders, callerRole);
-    if (request.method === 'POST') return handleCreateResource(request, 'workers', callerUid, projectId, accessToken, corsHeaders);
+    if (request.method === 'POST') return handleCreateResource(request, 'workers', callerUid, projectId, accessToken, corsHeaders, callerRole);
     if (request.method === 'PUT') return handleUpdateResource(request, 'workers', route.id, callerUid, projectId, accessToken, corsHeaders, callerRole);
     return handleDeleteResource(route.id, 'workers', projectId, accessToken, corsHeaders);
   }
@@ -395,9 +395,10 @@ async function handleListResource(request, resource, projectId, accessToken, cor
   return jsonResponse({ success: true, [resource]: visibleRecords, nextPageToken: result.nextPageToken }, 200, corsHeaders);
 }
 
-async function handleCreateResource(request, resource, callerUid, projectId, accessToken, corsHeaders) {
+async function handleCreateResource(request, resource, callerUid, projectId, accessToken, corsHeaders, callerRole = 'super_admin') {
   const payload = await parseJsonBody(request);
   validateResourcePayload(payload, resource, true);
+  if (resource === 'workers') assertResponsibleWorkerFieldsAllowed(callerRole, payload);
   if (resource === 'workers') {
     const existingWorkers = await listAllFirestoreDocs(projectId, accessToken, 'workers', 100, 500);
     const duplicateName = existingWorkers.documents.map(doc => convertFromFirestoreFields(doc.fields || {})).some(worker => worker.status === 'active' && String(worker.name || '').trim().toLocaleLowerCase() === payload.name.trim().toLocaleLowerCase());
@@ -438,9 +439,7 @@ async function handleCreateResource(request, resource, callerUid, projectId, acc
 async function handleUpdateResource(request, resource, id, callerUid, projectId, accessToken, corsHeaders, callerRole = null) {
   const payload = await parseJsonBody(request);
   validateResourcePayload(payload, resource, false);
-  if (resource === 'workers' && callerRole === 'responsible' && Object.keys(payload || {}).some(key => !['name', 'machineNumber', 'shift', 'status'].includes(key))) {
-    throw createHttpError('المسؤول يستطيع تعديل الاسم والمكينة والوردية وحالة الحساب فقط', 403, 'responsible_worker_field_forbidden');
-  }
+  if (resource === 'workers') assertResponsibleWorkerFieldsAllowed(callerRole, payload);
   const currentDoc = await getFirestoreDoc(projectId, accessToken, `${resource}/${id}`);
   if (!currentDoc) throw createHttpError('المورد المطلوب غير موجود', 404, 'resource_not_found');
   const current = convertFromFirestoreFields(currentDoc.fields || {});
@@ -542,6 +541,16 @@ async function handleUpdateTaskCollection(request, callerUid, projectId, accessT
 }
 
 /** @param {string} role @param {string} method @param {string | null} [action=null] */
+export function assertResponsibleWorkerFieldsAllowed(role, payload) {
+  if (role !== 'responsible') return true;
+  const allowed = ['name', 'machineNumber', 'shift', 'status'];
+  const forbidden = Object.keys(payload || {}).filter(key => !allowed.includes(key));
+  if (forbidden.length) {
+    throw createHttpError('المسؤول لا يستطيع إدخال أو تعديل بيانات العامل خارج الاسم والمكينة والوردية والحالة', 403, 'responsible_worker_field_forbidden');
+  }
+  return true;
+}
+
 export function assertWorkerManagementPermission(role, method, action = null) {
   if (role === 'super_admin') return true;
   if (role === 'admin' && ['GET', 'POST', 'PUT', 'DELETE'].includes(method)) return true;
