@@ -914,8 +914,9 @@ async function readDirectConversation(conversationId, projectId, accessToken) {
       structuredQuery: {
         from: [{ collectionId: 'messages' }],
         where: { fieldFilter: { field: { fieldPath: 'conversationId' }, op: 'EQUAL', value: { stringValue: conversationId } } },
-        orderBy: [{ field: { fieldPath: 'createdAt' }, direction: 'DESCENDING' }],
-        limit: 100
+        // Avoid requiring a composite Firestore index: retrieve a bounded history,
+        // then sort the selected conversation locally by its server timestamp.
+        limit: 1000
       }
     })
   });
@@ -925,7 +926,7 @@ async function readDirectConversation(conversationId, projectId, accessToken) {
     const message = convertFromFirestoreFields(row.document.fields || {});
     message.id = message.id || firestoreDocumentId(row.document.name);
     return message;
-  }).reverse();
+  }).sort((a, b) => String(a.createdAt || '').localeCompare(String(b.createdAt || '')));
 }
 
 async function handleDirectMessages(request, otherUid, callerUid, callerRole, projectId, accessToken, corsHeaders) {
