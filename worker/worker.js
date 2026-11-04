@@ -1132,13 +1132,14 @@ async function handleListCycles(request, projectId, accessToken, corsHeaders) {
   const url = new URL(request.url);
   const requested = Number(url.searchParams.get('pageSize') || '100');
   const pageSize = Number.isInteger(requested) ? Math.min(Math.max(requested, 1), 200) : 100;
-  // Load the full recent history in bounded pages so the UI does not silently
-  // stop showing reports after the first 100 records.
-  const result = await listAllFirestoreDocs(projectId, accessToken, 'machine_cycles', pageSize, 1000);
+  const pageToken = url.searchParams.get('pageToken') || null;
+  // Fetch a bounded page, newest machine-cycle reports first. The client can
+  // request older pages without loading an ever-growing collection at once.
+  const result = await listFirestoreDocs(projectId, accessToken, 'machine_cycles', pageSize, pageToken, '__name__ desc');
   const data = result.documents.map(doc => convertFromFirestoreFields(doc.fields || {}))
     .sort((a, b) => String(b.recordedAt || '').localeCompare(String(a.recordedAt || '')))
     .map(({ photo, ...report }) => ({ ...report, hasPhoto: Boolean(photo) }));
-  return jsonResponse({ success: true, data, hasMore: Boolean(result.nextPageToken) }, 200, corsHeaders);
+  return jsonResponse({ success: true, data, nextPageToken: result.nextPageToken }, 200, corsHeaders);
 }
 
 async function handleWorkerListTasks(workerId, projectId, accessToken, corsHeaders) {
@@ -2345,10 +2346,11 @@ async function getFirestoreDoc(projectId, accessToken, path, transactionId) {
   return await resp.json();
 }
 
-async function listFirestoreDocs(projectId, accessToken, collection, pageSize, pageToken) {
+async function listFirestoreDocs(projectId, accessToken, collection, pageSize, pageToken, orderBy) {
   const url = new URL(`${FIRESTORE_BASE_URL}/${projectId}/databases/(default)/documents/${collection}`);
   url.searchParams.set('pageSize', String(pageSize));
   if (pageToken) url.searchParams.set('pageToken', pageToken);
+  if (orderBy) url.searchParams.set('orderBy', orderBy);
   const resp = await fetch(url, {
     headers: { Authorization: `Bearer ${accessToken}` },
   });
