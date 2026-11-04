@@ -36,12 +36,14 @@ export async function listShoeModels(options: {
   search?: string;
   category?: CreateModelPayload['category'];
   pageSize?: number;
+  pageToken?: string | null;
 } = {}): Promise<ListModelsResponse> {
   const token = await getAuthToken();
   const params = new URLSearchParams();
   if (options.search?.trim()) params.set('q', options.search.trim());
   if (options.category) params.set('category', options.category);
   if (options.pageSize) params.set('pageSize', String(options.pageSize));
+  if (options.pageToken) params.set('pageToken', options.pageToken);
   const query = params.toString();
   const response = await fetch(`${WORKER_BASE_URL}/api/models${query ? `?${query}` : ''}`, {
     headers: { Authorization: `Bearer ${token}` },
