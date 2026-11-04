@@ -3,6 +3,7 @@ import { MessageCircle, Gauge } from 'lucide-react';
 import { createTask, createWorker, flushQueuedMutations, listTasks, listWorkers, queuedMutationCount, recordProgress, setWorkerPin, updateTask, updateWorker, listMachineCycles, getMachineCyclePhoto } from '../lib/operationsApi';
 import { PrivateMessagesPanel } from './PrivateMessagesPanel';
 import { listShoeModels } from '../lib/modelsApi';
+import { readOfflineSnapshot, saveOfflineSnapshot } from '../utils/offlineCache';
 import type { ShoeModel } from '../types/models';
 import type { TaskRecord, WorkerRecord, MachineCycleRecord } from '../types/operations';
 import type { UserProfile } from '../lib/firebase';
@@ -43,13 +44,34 @@ export const OperationsPanel: React.FC<Props> = ({ initialSection, admin }) => {
     setError(null);
     try {
       const [w, t, m, c] = await Promise.all([listWorkers(), listTasks(), listShoeModels({ pageSize: 100 }), listMachineCycles()]);
-      setWorkers(w.data || []);
-      setWorkerEdits(current => Object.fromEntries((w.data || []).map(worker => [worker.id, current[worker.id] || { name: worker.name, phone: worker.phone || '', machineNumber: String(worker.machineNumber || ''), shift: worker.shift || 'day' }])));
-      setTasks(t.data || []);
-      setModels(m.models || []);
-      setCycles(c.data || []);
+      const workerData = w.data || [], taskData = t.data || [], modelData = m.models || [], cycleData = c.data || [];
+      setWorkers(workerData);
+      setWorkerEdits(current => Object.fromEntries(workerData.map(worker => [worker.id, current[worker.id] || { name: worker.name, phone: worker.phone || '', machineNumber: String(worker.machineNumber || ''), shift: worker.shift || 'day' }])));
+      setTasks(taskData);
+      setModels(modelData);
+      setCycles(cycleData);
+      void Promise.all([
+        saveOfflineSnapshot(`management-workers:${admin.uid}`, workerData),
+        saveOfflineSnapshot(`management-tasks:${admin.uid}`, taskData),
+        saveOfflineSnapshot(`management-models:${admin.uid}`, modelData),
+        saveOfflineSnapshot(`management-cycles:${admin.uid}`, cycleData)
+      ]).catch(() => undefined);
     } catch (e) {
-      setError(e instanceof Error ? e.message : 'تعذر تحميل البيانات.');
+      const [cachedWorkers, cachedTasks, cachedModels, cachedCycles] = await Promise.all([
+        readOfflineSnapshot<WorkerRecord[]>(`management-workers:${admin.uid}`).catch(() => null),
+        readOfflineSnapshot<TaskRecord[]>(`management-tasks:${admin.uid}`).catch(() => null),
+        readOfflineSnapshot<ShoeModel[]>(`management-models:${admin.uid}`).catch(() => null),
+        readOfflineSnapshot<MachineCycleRecord[]>(`management-cycles:${admin.uid}`).catch(() => null)
+      ]);
+      if (cachedWorkers || cachedTasks || cachedModels || cachedCycles) {
+        const workerData = cachedWorkers || [], taskData = cachedTasks || [];
+        setWorkers(workerData);
+        setWorkerEdits(current => Object.fromEntries(workerData.map(worker => [worker.id, current[worker.id] || { name: worker.name, phone: worker.phone || '', machineNumber: String(worker.machineNumber || ''), shift: worker.shift || 'day' }])));
+        setTasks(taskData); setModels(cachedModels || []); setCycles(cachedCycles || []);
+        setNotice('أنت دون اتصال؛ تعرض آخر نسخة محفوظة من بيانات الإدارة. العمليات الجديدة ستنتظر المزامنة.');
+      } else {
+        setError(e instanceof Error ? e.message : 'تعذر تحميل البيانات ولا توجد نسخة محفوظة.');
+      }
     }
   };
 
