@@ -499,6 +499,9 @@ async function handleUpdateResource(request, resource, id, callerUid, projectId,
     }
   }
 
+  const allAccounts = (await listFirestoreDocs(projectId, accessToken, 'users', 100)).documents
+    .map(item => ({ ...convertFromFirestoreFields(item.fields || {}), uid: item.name?.split('/').pop() }));
+  assertManagementAccountUpdateAllowed(current, changes, allAccounts, uid, callerUid);
   const record = { ...current, ...changes, updatedBy: callerUid, updatedAt: new Date().toISOString() };
   const write = { update: { name: `projects/${projectId}/databases/(default)/documents/${resource}/${id}`, fields: convertToFirestoreFields(record) }, currentDocument: { updateTime: currentDoc.updateTime } };
   await commitFirestoreTransaction(projectId, accessToken, null, [write]);
@@ -527,6 +530,26 @@ export function assertWorkerManagementPermission(role, method, action = null) {
 export function assertSuperAdminManagementAccountsPermission(role) {
   if (role === 'super_admin') return true;
   throw createHttpError('إدارة حسابات المديرين والمسؤولين من صلاحيات المشرف العام فقط', 403, 'super_admin_only_management_accounts');
+}
+
+/** @param {{role:string,status?:string,shift?:string}} current
+ * @param {{status?:string,shift?:string}} changes
+ * @param {Array<{uid?:string,id?:string,role?:string,status?:string,shift?:string}>} accounts
+ * @param {string} targetUid
+ * @param {string} callerUid
+ */
+export function assertManagementAccountUpdateAllowed(current, changes, accounts, targetUid, callerUid) {
+  if (targetUid === callerUid && changes.status === 'inactive') {
+    throw createHttpError('لا يمكن للمشرف العام تجميد حسابه بنفسه', 403, 'cannot_freeze_self');
+  }
+  const nextStatus = changes.status ?? current.status;
+  const nextShift = changes.shift ?? current.shift;
+  if (current.role === 'responsible' && nextStatus === 'active' &&
+      accounts.some(user => (user.uid || user.id) !== targetUid &&
+        user.role === 'responsible' && user.status === 'active' && user.shift === nextShift)) {
+    throw createHttpError('توجد بالفعل حساب مسؤول نشط لهذه الوردية', 409, 'responsible_shift_taken');
+  }
+  return true;
 }
 
 export function buildWorkerFreezeUpdate(current, timestamp) {
@@ -580,8 +603,9 @@ async function handleCreateManagementAccount(request, callerUid, projectId, acce
     throw createHttpError('يوجد حساب من النوع نفسه بهذا الاسم بالفعل', 409, 'management_name_taken');
   }
   if (role === 'responsible') {
-    if (accounts.length >= 2) throw createHttpError('تم إنشاء حسابَي المسؤول بالفعل؛ واحد للنهار وآخر لليل', 409, 'responsible_accounts_limit');
-    if (accounts.some(user => user.shift === shift)) throw createHttpError('يوجد بالفعل حساب مسؤول مخصص لهذه الوردية', 409, 'responsible_shift_taken');
+    const activeAccounts = accounts.filter(user => user.status === 'active');
+    if (activeAccounts.length >= 2) throw createHttpError('يوجد حسابا مسؤول نشطان بالفعل؛ واحد للنهار وآخر لليل', 409, 'responsible_accounts_limit');
+    if (activeAccounts.some(user => user.shift === shift)) throw createHttpError('يوجد بالفعل حساب مسؤول مخصص لهذه الوردية', 409, 'responsible_shift_taken');
   }
   const uid = `mgr_${crypto.randomUUID().replace(/-/g, '')}`;
   const now = new Date().toISOString();
@@ -633,7 +657,7 @@ async function handleUpdateManagementAccount(request, uid, callerUid, projectId,
   if (payload.shift !== undefined) {
     if (current.role !== 'responsible' || !['day', 'night'].includes(payload.shift)) throw createHttpError('الوردية غير صالحة لهذا الحساب', 400, 'invalid_responsible_shift');
     const all = await listFirestoreDocs(projectId, accessToken, 'users', 100);
-    if (all.documents.map(d => convertFromFirestoreFields(d.fields || {})).some(user => (user.uid || user.id) !== uid && user.role === 'responsible' && user.shift === payload.shift)) throw createHttpError('هذه الوردية مخصصة لحساب مسؤول آخر', 409, 'responsible_shift_taken');
+    if (all.documents.map(d => convertFromFirestoreFields(d.fields || {})).some(user => (user.uid || user.id) !== uid && user.role === 'responsible' && user.status === 'active' && user.shift === payload.shift)) throw createHttpError('هذه الوردية مخصصة لحساب مسؤول آخر', 409, 'responsible_shift_taken');
     changes.shift = payload.shift;
   }
   if (payload.status !== undefined) {
