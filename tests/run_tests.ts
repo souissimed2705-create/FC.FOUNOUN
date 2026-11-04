@@ -30,6 +30,7 @@ import {
   assertWorkerManagementPermission,
   assertSuperAdminManagementAccountsPermission,
   assertManagementAccountUpdateAllowed,
+  buildResponsibleShiftReservationWrite,
   isExactParticipantPair,
   firestoreDocumentId,
   isOriginAllowed,
@@ -363,6 +364,27 @@ export async function runAllTests() {
     'منع تفعيل مسؤولين اثنين في الوردية نفسها',
     409
   );
+
+  const daySlotPath = 'projects/test-project/databases/(default)/documents/management_responsible_slots/day';
+  const firstDayReservation = buildResponsibleShiftReservationWrite('test-project', 'mgr_first', 'day', null, true);
+  assert(firstDayReservation.currentDocument.exists === false && firstDayReservation.update.name === daySlotPath,
+    'حجز وردية جديدة بشرط عدم وجود حجز سابق');
+  const occupiedDaySlot = {
+    updateTime: '2026-11-04T10:00:00.000000Z',
+    fields: convertToFirestoreFields({ uid: 'mgr_first', shift: 'day', status: 'active' })
+  };
+  assertThrowsWithCode(
+    () => buildResponsibleShiftReservationWrite('test-project', 'mgr_second', 'day', occupiedDaySlot, true),
+    'responsible_shift_taken',
+    'رفض حجز وردية نشطة لمسؤول آخر',
+    409
+  );
+  const releaseDaySlot = buildResponsibleShiftReservationWrite('test-project', 'mgr_first', 'day', occupiedDaySlot, false);
+  assert(releaseDaySlot.currentDocument.updateTime === occupiedDaySlot.updateTime &&
+    convertFromFirestoreFields(releaseDaySlot.update.fields).status === 'inactive',
+    'تحرير الوردية بتحديث مشروط يمنع الكتابة فوق حجز أحدث');
+  assert(buildResponsibleShiftReservationWrite('test-project', 'mgr_second', 'day', occupiedDaySlot, false) === null,
+    'عدم تحرير حجز يخص مسؤولاً آخر');
 
   // 9. Worker account freeze is reversible; the record is retained, never hard-deleted.
   console.log('\n9. اختبارات تجميد حساب العامل دون حذفه:');
