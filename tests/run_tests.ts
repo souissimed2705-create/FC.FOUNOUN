@@ -366,7 +366,7 @@ export async function runAllTests() {
   );
 
   const daySlotPath = 'projects/test-project/databases/(default)/documents/management_responsible_slots/day';
-  const firstDayReservation = buildResponsibleShiftReservationWrite('test-project', 'mgr_first', 'day', null, true);
+  const firstDayReservation: any = buildResponsibleShiftReservationWrite('test-project', 'mgr_first', 'day', null, true);
   assert(firstDayReservation?.currentDocument.exists === false && firstDayReservation?.update.name === daySlotPath,
     'حجز وردية جديدة بشرط عدم وجود حجز سابق');
   const occupiedDaySlot = {
@@ -379,9 +379,9 @@ export async function runAllTests() {
     'رفض حجز وردية نشطة لمسؤول آخر',
     409
   );
-  const releaseDaySlot = buildResponsibleShiftReservationWrite('test-project', 'mgr_first', 'day', occupiedDaySlot, false);
+  const releaseDaySlot: any = buildResponsibleShiftReservationWrite('test-project', 'mgr_first', 'day', occupiedDaySlot, false);
   assert(releaseDaySlot !== null && releaseDaySlot.currentDocument.updateTime === occupiedDaySlot.updateTime &&
-    convertFromFirestoreFields(releaseDaySlot.update.fields).status === 'inactive',
+    (convertFromFirestoreFields(releaseDaySlot.update.fields) as any).status === 'inactive',
     'تحرير الوردية بتحديث مشروط يمنع الكتابة فوق حجز أحدث');
   assert(buildResponsibleShiftReservationWrite('test-project', 'mgr_second', 'day', occupiedDaySlot, false) === null,
     'عدم تحرير حجز يخص مسؤولاً آخر');
