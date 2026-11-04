@@ -976,7 +976,9 @@ async function handleWorkerCycles(request, workerId, projectId, accessToken, cor
     throw createHttpError('صورة العداد غير صالحة أو حجمها كبير؛ أعد اختيار صورة مضغوطة', 400, 'invalid_counter_photo');
   }
   const now = new Date();
-  const date = new Intl.DateTimeFormat('en-CA', { timeZone: 'Africa/Tunis', year: 'numeric', month: '2-digit', day: '2-digit' }).format(now);
+  const dateParts = new Intl.DateTimeFormat('en-GB', { timeZone: 'Africa/Tunis', year: 'numeric', month: '2-digit', day: '2-digit' }).formatToParts(now);
+  const datePart = Object.fromEntries(dateParts.filter(part => part.type !== 'literal').map(part => [part.type, part.value]));
+  const date = `${datePart.year}-${datePart.month}-${datePart.day}`;
   const shift = worker.shift;
   const machineNumber = worker.machineNumber;
   const id = `mc_${date.replace(/-/g, '')}_${machineNumber}_${shift}`;
