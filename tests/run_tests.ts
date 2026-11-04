@@ -29,6 +29,7 @@ import {
   buildWorkerFreezeUpdate,
   assertWorkerManagementPermission,
   assertTaskManagementPermission,
+  assertTaskCreationFieldsAllowed,
   assertResponsibleWorkerFieldsAllowed,
   assertSuperAdminManagementAccountsPermission,
   assertManagementAccountUpdateAllowed,
@@ -424,6 +425,20 @@ export async function runAllTests() {
 
   // 9. Worker account freeze is reversible; the record is retained, never hard-deleted.
   console.log('\n9. اختبارات تجميد حساب العامل دون حذفه:');
+  assert(assertTaskCreationFieldsAllowed({ title: 'أمر إنتاج', targetQuantity: 50 }) === true,
+    'السماح بإنشاء مهمة جديدة دون التلاعب بحالة الإنجاز');
+  assertThrowsWithCode(
+    () => assertTaskCreationFieldsAllowed({ title: 'أمر إنتاج', completedQuantity: 30 }),
+    'completed_quantity_read_only',
+    'منع تزوير كمية منجزة عند إنشاء المهمة',
+    400
+  );
+  assertThrowsWithCode(
+    () => assertTaskCreationFieldsAllowed({ title: 'أمر إنتاج', status: 'completed' }),
+    'invalid_initial_task_status',
+    'منع إنشاء مهمة بحالة مكتملة قبل تسجيل الإنجاز',
+    400
+  );
   assert(assertTaskManagementPermission('admin') === true, 'السماح للمدير العام بإدارة مهام الإنتاج');
   assert(assertTaskManagementPermission('super_admin') === true, 'السماح للمشرف العام بإدارة مهام الإنتاج');
   assertThrowsWithCode(
