@@ -149,7 +149,7 @@ export const OperationsPanel: React.FC<Props> = ({ initialSection, admin }) => {
   const addWorker = (e: React.FormEvent) => {
     e.preventDefault();
     if (!name.trim()) { setError('اسم العامل مطلوب.'); return; }
-    const payload = { name: name.trim(), ...(!isResponsible ? { phone: phone.trim() } : {}), machineNumber: Number(machineNumber) as 1 | 2 | 3, shift };
+    const payload = { name: name.trim(), ...(!isResponsible ? { phone: phone.trim() } : {}), machineNumber: Number(machineNumber) as 1 | 2 | 3, shift, clientMutationId: crypto.randomUUID() };
     void runMutation(() => createWorker(payload), { path: '/api/workers', init: { method: 'POST', body: JSON.stringify(payload) } });
     setName(''); setPhone('');
   };
@@ -170,7 +170,8 @@ export const OperationsPanel: React.FC<Props> = ({ initialSection, admin }) => {
       if (task && qty < task.completedQuantity) { setError('لا يمكن جعل الكمية المطلوبة أقل من الكمية المنجزة بالفعل.'); return; }
       void runMutation(() => updateTask(editingTaskId, payload), { path: '/api/tasks/' + encodeURIComponent(editingTaskId), init: { method: 'PUT', body: JSON.stringify(payload) } });
     } else {
-      void runMutation(() => createTask(payload), { path: '/api/tasks', init: { method: 'POST', body: JSON.stringify(payload) } });
+      const createPayload = { ...payload, clientMutationId: crypto.randomUUID() };
+      void runMutation(() => createTask(createPayload), { path: '/api/tasks', init: { method: 'POST', body: JSON.stringify(createPayload) } });
     }
     setModelId(''); setTargetQuantity(''); setDescription(''); setEditingTaskId(null);
   };
