@@ -25,6 +25,8 @@ export const OperationsPanel: React.FC<Props> = ({ initialSection, admin }) => {
   const [machineNumber, setMachineNumber] = useState<'1' | '2' | '3'>('1');
   const [shift, setShift] = useState<'day' | 'night'>('day');
   const [cycles, setCycles] = useState<MachineCycleRecord[]>([]);
+  const [cycleNextPageToken, setCycleNextPageToken] = useState<string | null>(null);
+  const [loadingMoreCycles, setLoadingMoreCycles] = useState(false);
   const [cycleMachineFilter, setCycleMachineFilter] = useState('');
   const [cycleShiftFilter, setCycleShiftFilter] = useState('');
   const [cycleDateFilter, setCycleDateFilter] = useState('');
@@ -44,11 +46,30 @@ export const OperationsPanel: React.FC<Props> = ({ initialSection, admin }) => {
   const [pending, setPending] = useState(queuedMutationCount());
   const [busy, setBusy] = useState(false);
 
+  const loadMoreCycles = async () => {
+    if (!cycleNextPageToken || loadingMoreCycles) return;
+    setLoadingMoreCycles(true);
+    setError(null);
+    try {
+      const page = await listMachineCycles(cycleNextPageToken);
+      setCycles(current => {
+        const known = new Set(current.map(report => report.id));
+        return [...current, ...(page.data || []).filter(report => !known.has(report.id))];
+      });
+      setCycleNextPageToken(page.nextPageToken || null);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'تعذر تحميل التقارير الأقدم.');
+    } finally {
+      setLoadingMoreCycles(false);
+    }
+  };
+
   const refresh = async () => {
     setError(null);
     try {
       const [w, t, m, c] = await Promise.all([listWorkers(), listTasks(), listShoeModels({ pageSize: 100 }), listMachineCycles()]);
       const workerData = w.data || [], taskData = t.data || [], modelData = m.models || [], cycleData = c.data || [];
+      setCycleNextPageToken(c.nextPageToken || null);
       setWorkers(workerData);
       setWorkerEdits(current => Object.fromEntries(workerData.map(worker => [worker.id, current[worker.id] || { name: worker.name, phone: worker.phone || '', machineNumber: String(worker.machineNumber || ''), shift: worker.shift || 'day' }])));
       setTasks(taskData);
@@ -244,9 +265,10 @@ export const OperationsPanel: React.FC<Props> = ({ initialSection, admin }) => {
         <select aria-label="تصفية حسب الوردية" className="field" value={cycleShiftFilter} onChange={e => setCycleShiftFilter(e.target.value)}><option value="">كل الورديات</option><option value="day">النهار</option><option value="night">الليل</option></select>
         <input aria-label="تصفية حسب التاريخ" className="field" type="date" value={cycleDateFilter} onChange={e => setCycleDateFilter(e.target.value)} />
       </div>
-      <p className="text-xs text-gray-500">عدد التقارير المعروضة: {filteredCycles.length}</p>
-      {!filteredCycles.length && <p className="rounded-xl border border-white/10 bg-[#080808] p-6 text-center text-sm text-gray-500">لا توجد تقارير تطابق عوامل التصفية.</p>}
+      <p className="text-xs text-gray-500">عدد التقارير المعروضة: {filteredCycles.length}{cycleNextPageToken ? ' · توجد تقارير أقدم' : ''}</p>
+      {!filteredCycles.length && <p className="rounded-xl border border-white/10 bg-[#080808] p-6 text-center text-sm text-gray-500">لا توجد تقارير تطابق عوامل التصفية في الصفحات المحمّلة.</p>}
       {filteredCycles.map(report => <article key={report.id} className="rounded-xl border border-white/10 bg-[#080808] p-3"><div className="flex flex-wrap items-center justify-between gap-2"><b>المكينة {report.machineNumber} · {report.shift === 'day' ? 'النهار' : 'الليل'}</b><strong className="text-[#F5D77F]">{report.count.toLocaleString('ar-TN')} دورة</strong></div><p className="mt-1 text-xs text-gray-400">{report.date}{report.recordedAt ? ` · ${new Date(report.recordedAt).toLocaleString('ar-TN', { timeZone: 'Africa/Tunis' })}` : ''} · {report.workerName}</p><p className="mt-1 text-xs text-gray-500">{report.hasPhoto ? <button className="secondary-button mt-2" onClick={async () => { try { const result = await getMachineCyclePhoto(report.id); setSelectedCyclePhoto(result.data); } catch (e) { setError(e instanceof Error ? e.message : 'تعذر عرض صورة العداد.'); } }}>عرض صورة العداد</button> : 'لا توجد صورة مرفقة'}</p></article>)}
+      {cycleNextPageToken && <button className="secondary-button w-full" disabled={loadingMoreCycles} onClick={() => void loadMoreCycles()}>{loadingMoreCycles ? 'جارٍ تحميل التقارير...' : 'تحميل التقارير الأقدم'}</button>}
     </div>}
 
     {selectedCyclePhoto && <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/90 p-4" role="dialog" aria-modal="true" aria-label="صورة عداد المكينة" onClick={() => setSelectedCyclePhoto(null)}><div className="max-h-[90vh] max-w-3xl rounded-xl border border-[#D4AF37]/40 bg-[#111] p-3" onClick={e => e.stopPropagation()}><div className="mb-2 flex justify-between"><b className="text-[#F5D77F]">صورة عداد المكينة</b><button className="secondary-button" onClick={() => setSelectedCyclePhoto(null)}>إغلاق</button></div><img src={selectedCyclePhoto.photo} alt="صورة عداد المكينة" className="max-h-[78vh] w-auto rounded-lg object-contain" /></div></div>}
