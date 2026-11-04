@@ -510,7 +510,7 @@ async function handleUpdateResource(request, resource, id, callerUid, projectId,
     if (willBeActive) {
       const targetPath = workerMachineSlotPath(record.machineNumber, record.shift);
       const targetSlot = await getFirestoreDoc(projectId, accessToken, targetPath);
-      if (!targetSlot) {
+      if (!targetSlot || convertFromFirestoreFields(targetSlot.fields || {}).status !== 'active') {
         const allWorkers = await listAllFirestoreDocs(projectId, accessToken, 'workers', 100, 500);
         const occupiedLegacy = allWorkers.documents.map(doc => convertFromFirestoreFields(doc.fields || {}))
           .some(worker => worker.id !== id && worker.status === 'active' && worker.machineNumber === record.machineNumber && worker.shift === record.shift);
