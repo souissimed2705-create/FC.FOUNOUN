@@ -16,7 +16,7 @@ import {
   auth,
   isFirebaseConfigured,
   getFirebaseConfigurationError,
-  verifySuperAdmin,
+  verifyAdmin,
   UserProfile,
   mapAuthorizationErrorToArabic,
 } from './lib/firebase';
@@ -47,7 +47,7 @@ export default function App() {
             setVerifiedAdmin(null);
             setSessionError(null);
           } else {
-            const profile = await verifySuperAdmin(user.uid);
+            const profile = await verifyAdmin(user.uid);
             setVerifiedAdmin(profile);
             setVerifiedWorker(null);
             setSessionError(null);
