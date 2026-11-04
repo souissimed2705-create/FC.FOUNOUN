@@ -132,6 +132,9 @@ export const OperationsPanel: React.FC<Props> = ({ initialSection, admin }) => {
     } finally { setBusy(false); }
   };
 
+  const taskStatusLabel = (status: TaskRecord['status']) => ({
+    open: 'جديدة', in_progress: 'قيد التنفيذ', pending: 'معلّقة', completed: 'مكتملة', cancelled: 'ملغاة'
+  }[status]);
   const tabs: { id: Section; label: string }[] = [
     ...(isSupervisor ? [{ id: 'workers' as const, label: 'إدارة العمال' }] : []),
     { id: 'tasks', label: 'أوامر الإنتاج' },
@@ -199,7 +202,7 @@ export const OperationsPanel: React.FC<Props> = ({ initialSection, admin }) => {
         </form>
       </div>
       <div className="space-y-2">{tasks.map(t => <article key={t.id} className="rounded-xl border border-white/10 bg-[#0A0A0A] p-3">
-        <div className="flex justify-between gap-2"><b>{t.modelName || t.title}</b><span className="text-xs text-[#F5D77F]">{t.status}</span></div>
+        <div className="flex justify-between gap-2"><b>{t.modelName || t.title}</b><span className="text-xs text-[#F5D77F]">{taskStatusLabel(t.status)}</span></div>
         {t.description && <p className="text-sm text-gray-400 mt-1">{t.description}</p>}
         <p className="text-xs text-gray-400 mt-1">العامل: {t.assignedWorkerName || t.assignedWorkerId} · المطلوب: {t.targetQuantity} · المنجز: {t.completedQuantity} · المتبقي: {Math.max(0, t.targetQuantity - t.completedQuantity)}</p>
         <div className="mt-2 h-2 rounded-full bg-white/10"><div className="h-2 rounded-full bg-[#D4AF37]" style={{ width: Math.min(100, t.completedQuantity / Math.max(1, t.targetQuantity) * 100) + '%' }} /></div>
