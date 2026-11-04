@@ -12,7 +12,7 @@ import {
 import { signInWithEmailAndPassword, signOut } from 'firebase/auth';
 import {
   auth,
-  verifyAdmin,
+  verifySuperAdmin,
   UserProfile,
   mapAuthErrorToArabic,
   mapAuthorizationErrorToArabic,
@@ -58,7 +58,7 @@ export const AdminLoginForm: React.FC<AdminLoginFormProps> = ({
 
     // Validate Email
     if (!email.trim()) {
-      newErrors.email = 'يرجى إدخال البريد الإلكتروني الخاص بالمسؤول الرئيسي.';
+      newErrors.email = 'يرجى إدخال البريد الإلكتروني الخاص بالمشرف العام.';
     } else if (!isValidEmail(email)) {
       newErrors.email = 'صيغة البريد الإلكتروني غير صالحة. يرجى إدخال عنوان بريد إلكتروني صحيح.';
     }
@@ -101,7 +101,7 @@ export const AdminLoginForm: React.FC<AdminLoginFormProps> = ({
 
       // Step 2 & 3: Query Firestore doc: users/{uid} and verify role and status
       try {
-        const verifiedAdmin = await verifyAdmin(uid);
+        const verifiedAdmin = await verifySuperAdmin(uid);
 
         // Step 5: Authorization successful - grant dashboard entry
         setPassword('');
@@ -165,10 +165,10 @@ export const AdminLoginForm: React.FC<AdminLoginFormProps> = ({
         {/* Card Title & Subtitle */}
         <div className="text-center mb-6 sm:mb-8">
           <h2 className="text-xl sm:text-2xl font-bold text-white tracking-normal font-['Cairo']">
-            دخول المشرف أو المسؤول
+            دخول المشرف العام
           </h2>
           <p className="mt-1.5 text-xs sm:text-sm text-gray-400 font-normal leading-relaxed">
-            التحقق الثنائي: مصادقة الحساب وفحص صلاحية الإدارة <span className="font-mono text-[#D4AF37]">admin / super_admin</span> في Firestore
+            التحقق الثنائي: مصادقة الحساب وفحص صلاحية الإدارة <span className="font-mono text-[#D4AF37]">super_admin</span> في Firestore
           </p>
         </div>
 
@@ -191,7 +191,7 @@ export const AdminLoginForm: React.FC<AdminLoginFormProps> = ({
               htmlFor="admin-email"
               className="block text-xs sm:text-sm font-medium text-gray-300 mb-1.5 text-right"
             >
-              البريد الإلكتروني للمسؤول
+              البريد الإلكتروني للمشرف العام
             </label>
             <div className="relative">
               <input
@@ -322,7 +322,7 @@ export const AdminLoginForm: React.FC<AdminLoginFormProps> = ({
         {/* Security Policy Note */}
         <div className="mt-6 pt-5 border-t border-white/5 text-center">
           <p className="text-[11px] sm:text-xs text-gray-500 leading-normal">
-            مشروع: <span className="font-mono text-gray-400">fc-founoun</span> • مسار الصلاحية: <span className="font-mono text-gray-400">users/{'{uid}'}</span>. الدخول مقتصر على حسابات الإدارة النشطة ذات الدور admin أو super_admin.
+            مشروع: <span className="font-mono text-gray-400">fc-founoun</span> • مسار الصلاحية: <span className="font-mono text-gray-400">users/{'{uid}'}</span>. الدخول مقتصر على حساب المشرف العام النشط فقط.
           </p>
         </div>
       </div>
