@@ -21,7 +21,7 @@ export const OperationsPanel: React.FC<Props> = ({ initialSection, admin }) => {
   const [shift, setShift] = useState<'day' | 'night'>('day');
   const [cycles, setCycles] = useState<MachineCycleRecord[]>([]);
   const [selectedCyclePhoto, setSelectedCyclePhoto] = useState<{ id: string; photo: string } | null>(null);
-  const [workerEdits, setWorkerEdits] = useState<Record<string, { name: string; phone: string }>>({});
+  const [workerEdits, setWorkerEdits] = useState<Record<string, { name: string; phone: string; machineNumber: string; shift: 'day' | 'night' }>>({});
   const [pinId, setPinId] = useState('');
   const [pin, setPin] = useState('');
   const [modelId, setModelId] = useState('');
@@ -44,7 +44,7 @@ export const OperationsPanel: React.FC<Props> = ({ initialSection, admin }) => {
     try {
       const [w, t, m, c] = await Promise.all([listWorkers(), listTasks(), listShoeModels({ pageSize: 100 }), listMachineCycles()]);
       setWorkers(w.data || []);
-      setWorkerEdits(current => Object.fromEntries((w.data || []).map(worker => [worker.id, current[worker.id] || { name: worker.name, phone: worker.phone || '' }])));
+      setWorkerEdits(current => Object.fromEntries((w.data || []).map(worker => [worker.id, current[worker.id] || { name: worker.name, phone: worker.phone || '', machineNumber: String(worker.machineNumber || ''), shift: worker.shift || 'day' }])));
       setTasks(t.data || []);
       setModels(m.models || []);
       setCycles(c.data || []);
@@ -175,11 +175,13 @@ export const OperationsPanel: React.FC<Props> = ({ initialSection, admin }) => {
         <button className="gold-button">إضافة مشرف عمال</button>
       </form>
       <div className="space-y-2">{workers.map(w => <div key={w.id} className="flex flex-wrap items-center gap-2 rounded-xl border border-white/10 bg-[#0A0A0A] p-3">
-        <input className="field min-w-0 flex-1" aria-label="اسم العامل" value={workerEdits[w.id]?.name ?? w.name} onChange={e => setWorkerEdits(current => ({ ...current, [w.id]: { name: e.target.value, phone: current[w.id]?.phone ?? w.phone ?? '' } }))} />
-        <input className="field w-32" aria-label="هاتف العامل" value={workerEdits[w.id]?.phone ?? w.phone ?? ''} onChange={e => setWorkerEdits(current => ({ ...current, [w.id]: { name: current[w.id]?.name ?? w.name, phone: e.target.value } }))} />
+        <input className="field min-w-0 flex-1" aria-label="اسم العامل" value={workerEdits[w.id]?.name ?? w.name} onChange={e => setWorkerEdits(current => ({ ...current, [w.id]: { name: e.target.value, phone: current[w.id]?.phone ?? w.phone ?? '', machineNumber: current[w.id]?.machineNumber ?? String(w.machineNumber || ''), shift: current[w.id]?.shift ?? w.shift ?? 'day' } }))} />
+        <input className="field w-32" aria-label="هاتف العامل" value={workerEdits[w.id]?.phone ?? w.phone ?? ''} onChange={e => setWorkerEdits(current => ({ ...current, [w.id]: { name: current[w.id]?.name ?? w.name, phone: e.target.value, machineNumber: current[w.id]?.machineNumber ?? String(w.machineNumber || ''), shift: current[w.id]?.shift ?? w.shift ?? 'day' } }))} />
         <span className="text-xs text-[#F5D77F]">المكينة {w.machineNumber ?? 'غير محددة'} · {w.shift === 'day' ? 'نهار' : w.shift === 'night' ? 'ليل' : 'وردية غير محددة'}</span><span className="text-xs text-gray-500 font-mono">المعرّف: {w.id}</span>
         <span className="text-xs text-gray-400">{w.status}</span>
-        <button className="secondary-button" onClick={() => void runMutation(() => updateWorker(w.id, workerEdits[w.id] || { name: w.name, phone: w.phone || '' }))}>حفظ البيانات</button>
+        <select className="field w-28" aria-label="المكينة" value={workerEdits[w.id]?.machineNumber ?? String(w.machineNumber || '')} onChange={e => setWorkerEdits(current => ({ ...current, [w.id]: { name: current[w.id]?.name ?? w.name, phone: current[w.id]?.phone ?? w.phone ?? '', machineNumber: e.target.value, shift: current[w.id]?.shift ?? w.shift ?? 'day' } }))}><option value="">المكينة</option><option value="1">مكينة 1</option><option value="2">مكينة 2</option><option value="3">مكينة 3</option></select>
+        <select className="field w-28" aria-label="الوردية" value={workerEdits[w.id]?.shift ?? w.shift ?? 'day'} onChange={e => setWorkerEdits(current => ({ ...current, [w.id]: { name: current[w.id]?.name ?? w.name, phone: current[w.id]?.phone ?? w.phone ?? '', machineNumber: current[w.id]?.machineNumber ?? String(w.machineNumber || ''), shift: e.target.value as 'day' | 'night' } }))}><option value="day">نهار</option><option value="night">ليل</option></select>
+        <button className="secondary-button" onClick={() => { if (!workerEdits[w.id]?.machineNumber && !w.machineNumber) { setError('حدد المكينة والوردية أولاً.'); return; } void runMutation(() => updateWorker(w.id, { ...(workerEdits[w.id] || { name: w.name, phone: w.phone || '', machineNumber: String(w.machineNumber || ''), shift: w.shift || 'day' }), machineNumber: Number(workerEdits[w.id]?.machineNumber || w.machineNumber) as 1 | 2 | 3 })) }}>حفظ البيانات</button>
         <input className="field w-28" inputMode="numeric" maxLength={6} placeholder="PIN جديد" value={pinId === w.id ? pin : ''} onChange={e => { setPinId(w.id); setPin(e.target.value.replace(/\D/g, '')); }} />
         <button className="secondary-button" onClick={() => {
           if (pinId !== w.id || !/^\d{6}$/.test(pin)) { setError('PIN يجب أن يتكون من 6 أرقام بالضبط.'); return; }
