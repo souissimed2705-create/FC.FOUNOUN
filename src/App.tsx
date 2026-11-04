@@ -181,7 +181,7 @@ export default function App() {
                 </p>
                 <span className="h-px w-6 bg-gradient-to-l from-transparent to-[#D4AF37]/50"></span>
               </div>
-              <p className="mt-3 max-w-sm text-xs leading-6 text-gray-400">تطبيق فنون للأحذية لتنظيم الموديلات وأوامر الإنتاج ومتابعة العمل بين المشرف والمسؤول والعامل.</p>
+              <p className="mt-3 max-w-sm text-xs leading-6 text-gray-400">للبحث عن الموديلات وتنظيم أوامر الإنتاج ومتابعة إنجاز العمل.</p>
             </div>
 
             <div className="mb-3 grid w-full grid-cols-2 gap-2 rounded-xl border border-white/10 bg-[#111] p-1">
