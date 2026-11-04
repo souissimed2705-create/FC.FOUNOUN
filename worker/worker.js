@@ -399,6 +399,7 @@ async function handleListResource(request, resource, projectId, accessToken, cor
 }
 
 async function handleCreateResource(request, resource, callerUid, projectId, accessToken, corsHeaders, callerRole = 'super_admin') {
+  if (resource === 'tasks') assertTaskCreationFieldsAllowed(await parseJsonBody(request.clone()));
   const payload = await parseJsonBody(request);
   validateResourcePayload(payload, resource, true);
   if (resource === 'workers') assertResponsibleWorkerFieldsAllowed(callerRole, payload);
@@ -544,6 +545,16 @@ async function handleUpdateTaskCollection(request, callerUid, projectId, accessT
 }
 
 /** @param {string} role @param {string} method @param {string | null} [action=null] */
+export function assertTaskCreationFieldsAllowed(payload) {
+  if (Object.prototype.hasOwnProperty.call(payload || {}, 'completedQuantity')) {
+    throw createHttpError('الكمية المنجزة تبدأ من صفر وتُسجّل عبر سجل الإنجاز فقط', 400, 'completed_quantity_read_only');
+  }
+  if (Object.prototype.hasOwnProperty.call(payload || {}, 'status')) {
+    throw createHttpError('تبدأ المهمة بالحالة الجديدة؛ لا يمكن فرض حالتها عند الإنشاء', 400, 'invalid_initial_task_status');
+  }
+  return true;
+}
+
 export function assertResponsibleWorkerFieldsAllowed(role, payload) {
   if (role !== 'responsible') return true;
   const allowed = ['name', 'machineNumber', 'shift', 'status'];
