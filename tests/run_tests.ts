@@ -28,6 +28,7 @@ import {
   safeDecodeUriSegment,
   buildWorkerFreezeUpdate,
   assertWorkerManagementPermission,
+  assertWorkerPinCreationAllowed,
   assertTaskManagementPermission,
   assertTaskCreationFieldsAllowed,
   buildResourceCreationId,
@@ -530,6 +531,9 @@ export async function runAllTests() {
   );
   assert(assertWorkerManagementPermission('responsible', 'PUT') === true, 'السماح للمسؤول بتعديل بيانات وتعيين مشرف العمال');
   assertThrowsWithCode(() => assertWorkerManagementPermission('responsible', 'PUT', 'pin'), 'worker_pin_super_admin_only', 'منع المسؤول من تعيين PIN مشرف العمال', 403);
+  assert(assertWorkerPinCreationAllowed('super_admin', '123456') === true, 'السماح للمشرف العام بتعيين PIN عند إنشاء العامل');
+  assertThrowsWithCode(() => assertWorkerPinCreationAllowed('admin', '123456'), 'worker_pin_super_admin_only', 'منع المدير العام من تعيين PIN عند إنشاء العامل', 403);
+  assertThrowsWithCode(() => assertWorkerPinCreationAllowed('super_admin', '12345'), 'invalid_pin', 'رفض PIN العامل إذا لم يتكون من 6 أرقام', 400);
   assert(assertWorkerManagementPermission('responsible', 'DELETE') === true, 'السماح للمسؤول بتجميد حساب مشرف العمال دون حذفه نهائياً');
   assert(assertWorkerManagementPermission('admin', 'DELETE') === true, 'السماح للمدير العام بتجميد حساب مشرف العمال مع منع حذف حسابات الإدارة');
   assert(assertWorkerManagementPermission('super_admin', 'DELETE') === true, 'السماح للمشرف العام بتجميد حساب مشرف العمال');
