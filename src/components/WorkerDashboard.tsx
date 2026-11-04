@@ -122,29 +122,60 @@ export const WorkerDashboard: React.FC<Props> = ({ worker }) => {
     if (!Number.isSafeInteger(quantity) || quantity < 1) { setError('أدخل كمية صحيحة أكبر من صفر.'); return; }
     if (quantity > task.targetQuantity - task.completedQuantity) { setError('الكمية أكبر من المتبقي في المهمة.'); return; }
     setBusy(true); setError(''); setNotice('');
+    const body = { quantity, clientMutationId: crypto.randomUUID() };
+    const path = `/api/worker/tasks/${encodeURIComponent(task.id)}/progress`;
+    const init = { method: 'POST', body: JSON.stringify(body) };
     try {
-      const body = { quantity, clientMutationId: crypto.randomUUID() };
       if (!navigator.onLine) {
-        queueMutation(`/api/worker/tasks/${encodeURIComponent(task.id)}/progress`, { method: 'POST', body: JSON.stringify(body) });
+        queueMutation(path, init);
         setPendingSync(queuedMutationCount()); setNotice('لا يوجد اتصال؛ حُفظت كمية الإنجاز وستتم مزامنتها عند عودة الاتصال.');
       } else await recordMyProgress(task.id, body);
       setQuantities(v => ({ ...v, [task.id]: '' }));
-      setNotice('تم تسجيل الكمية المنجزة.');
+      if (navigator.onLine) setNotice('تم تسجيل الكمية المنجزة.');
       await refresh();
-    } catch (err) { setError(err instanceof Error ? err.message : 'تعذر تسجيل الإنجاز.'); }
+    } catch (err) {
+      if (err instanceof TypeError || !navigator.onLine) {
+        try {
+          queueMutation(path, init);
+          setPendingSync(queuedMutationCount());
+          setQuantities(v => ({ ...v, [task.id]: '' }));
+          setNotice('انقطع الاتصال أثناء الإرسال؛ حُفظت كمية الإنجاز وستتم مزامنتها عند عودة الاتصال.');
+          return;
+        } catch (queueError) {
+          setError(queueError instanceof Error ? queueError.message : 'تعذر حفظ كمية الإنجاز محلياً.');
+          return;
+        }
+      }
+      setError(err instanceof Error ? err.message : 'تعذر تسجيل الإنجاز.');
+    }
     finally { setBusy(false); }
   };
   const toggleTaskStatus = async (task: TaskRecord) => {
     const nextStatus = task.status === 'pending' ? 'in_progress' : 'pending';
+    const path = `/api/worker/tasks/${encodeURIComponent(task.id)}/status`;
+    const init = { method: 'PUT', body: JSON.stringify({ status: nextStatus }) };
     setBusy(true); setError(''); setNotice('');
     try {
       if (!navigator.onLine) {
-        queueMutation(`/api/worker/tasks/${encodeURIComponent(task.id)}/status`, { method: 'PUT', body: JSON.stringify({ status: nextStatus }) });
+        queueMutation(path, init);
         setPendingSync(queuedMutationCount());
       } else await updateMyTaskStatus(task.id, nextStatus);
       setNotice(nextStatus === 'pending' ? 'تم تعليق المهمة.' : 'تم استئناف المهمة.');
       await refresh();
-    } catch (err) { setError(err instanceof Error ? err.message : 'تعذر تغيير حالة المهمة.'); }
+    } catch (err) {
+      if (err instanceof TypeError || !navigator.onLine) {
+        try {
+          queueMutation(path, init);
+          setPendingSync(queuedMutationCount());
+          setNotice('انقطع الاتصال أثناء الإرسال؛ حُفظ تغيير حالة المهمة وستتم مزامنته عند عودة الاتصال.');
+          return;
+        } catch (queueError) {
+          setError(queueError instanceof Error ? queueError.message : 'تعذر حفظ تغيير الحالة محلياً.');
+          return;
+        }
+      }
+      setError(err instanceof Error ? err.message : 'تعذر تغيير حالة المهمة.');
+    }
     finally { setBusy(false); }
   };
   const statusLabel = (status: TaskRecord['status']) => ({
