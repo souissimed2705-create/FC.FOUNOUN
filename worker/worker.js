@@ -74,7 +74,7 @@ export default {
     const managementRoute = parseManagementRoute(cleanPath, request.method);
     const workerLoginRoute = cleanPath === '/api/worker-auth/login' && request.method === 'POST';
     const workerTasksRoute = cleanPath === '/api/worker/tasks' && request.method === 'GET';
-    const workerProgressMatch = cleanPath.match(/^\\/api\\/worker\\/tasks\\/([^/]+)\\/progress$/);
+    const workerProgressMatch = cleanPath.match(/^\/api\/worker\/tasks\/([^/]+)\/progress$/);
     const workerProgressRoute = workerProgressMatch && request.method === 'POST';
     if (managementRoute?.error) {
       return jsonResponse({ success: false, error: managementRoute.error.message, code: managementRoute.error.code }, 400, corsHeaders);
