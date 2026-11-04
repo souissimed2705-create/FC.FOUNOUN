@@ -73,6 +73,7 @@ export default {
     // 2. Strict API Path Routing
     const managementRoute = parseManagementRoute(cleanPath, request.method);
     const workerLoginRoute = cleanPath === '/api/worker-auth/login' && request.method === 'POST';
+    const managementLoginRoute = cleanPath === '/api/management-auth/login' && request.method === 'POST';
     const workerTasksRoute = cleanPath === '/api/worker/tasks' && request.method === 'GET';
     const workerProgressMatch = cleanPath.match(/^\/api\/worker\/tasks\/([^/]+)\/progress$/);
     const workerProgressRoute = workerProgressMatch && request.method === 'POST';
@@ -87,14 +88,14 @@ export default {
     if (managementRoute?.error) {
       return jsonResponse({ success: false, error: managementRoute.error.message, code: managementRoute.error.code }, 400, corsHeaders);
     }
-    if (!managementRoute && !workerLoginRoute && !workerTasksRoute && !workerProgressRoute && !workerTaskStatusRoute && !workerMessagesRoute && !workerCyclesRoute && !managementCyclesRoute && !managementCyclePhotoRoute && !adminMessagesRoute && !cleanPath.startsWith('/api/models')) {
+    if (!managementRoute && !workerLoginRoute && !managementLoginRoute && !workerTasksRoute && !workerProgressRoute && !workerTaskStatusRoute && !workerMessagesRoute && !workerCyclesRoute && !managementCyclesRoute && !managementCyclePhotoRoute && !adminMessagesRoute && !cleanPath.startsWith('/api/models')) {
       return jsonResponse({ success: false, error: 'المسار المطلوب غير موجود', code: 'not_found' }, 404, corsHeaders);
     }
 
     let modelIdParam = null;
     const modelsPrefix = '/api/models';
 
-    if (managementRoute || workerLoginRoute || workerTasksRoute || workerProgressRoute || workerTaskStatusRoute || workerMessagesRoute || workerCyclesRoute || managementCyclesRoute || managementCyclePhotoRoute || adminMessagesRoute) {
+    if (managementRoute || workerLoginRoute || managementLoginRoute || workerTasksRoute || workerProgressRoute || workerTaskStatusRoute || workerMessagesRoute || workerCyclesRoute || managementCyclesRoute || managementCyclePhotoRoute || adminMessagesRoute) {
       // Validated API routes are dispatched after authentication.
     } else if (cleanPath === modelsPrefix) {
       if (request.method !== 'GET' && request.method !== 'POST') {
@@ -150,9 +151,10 @@ export default {
       // 3. Authenticate Firebase ID Token
       const serviceAccount = parseServiceAccount(env);
       const projectId = env.PROJECT_ID || serviceAccount.project_id || 'fc-founoun';
-      if (workerLoginRoute) {
+      if (workerLoginRoute || managementLoginRoute) {
         const saAccessToken = await getServiceAccountAccessToken(serviceAccount);
-        return await handleWorkerLogin(request, env, projectId, saAccessToken, corsHeaders);
+        if (workerLoginRoute) return await handleWorkerLogin(request, env, projectId, saAccessToken, corsHeaders);
+        return await handleManagementLogin(request, env, projectId, saAccessToken, corsHeaders);
       }
 
       const authHeader = request.headers.get('Authorization') || '';
@@ -497,6 +499,51 @@ async function handleDeleteResource(id, resource, projectId, accessToken, corsHe
   throw createHttpError('الحذف الدائم غير مسموح لهذا المورد', 405, 'permanent_delete_forbidden');
 }
 
+
+async function handleManagementLogin(request, env, projectId, accessToken, corsHeaders) {
+  const payload = await parseJsonBody(request);
+  const name = typeof payload?.name === 'string' ? payload.name.trim() : '';
+  const code = typeof payload?.code === 'string' ? payload.code : '';
+  const role = payload?.role;
+  if (!name || name.length > 100 || !/^\d{6}$/.test(code) || !['admin', 'responsible'].includes(role)) {
+    throw createHttpError('أدخل الاسم والكود السري الصحيحين واختر نوع الحساب', 400, 'invalid_management_credentials');
+  }
+  const result = await listFirestoreDocs(projectId, accessToken, 'users', 100);
+  const matches = result.documents.map(doc => convertFromFirestoreFields(doc.fields || {}))
+    .filter(user => user.role === role && user.status === 'active' && String(user.displayName || user.name || '').trim().toLocaleLowerCase() === name.toLocaleLowerCase());
+  if (matches.length !== 1) throw createHttpError('الاسم أو الكود السري غير صحيح', 401, 'invalid_management_credentials');
+  const user = matches[0];
+  const uid = user.uid || user.id;
+  if (!uid) throw createHttpError('ملف الحساب غير مكتمل', 403, 'management_account_invalid');
+  const codeDoc = await getFirestoreDoc(projectId, accessToken, `management_codes/${uid}`);
+  if (!codeDoc) throw createHttpError('لم يعيّن المشرف العام كود دخول لهذا الحساب بعد', 403, 'management_code_missing');
+  const codeRecord = convertFromFirestoreFields(codeDoc.fields || {});
+  const attemptsPath = `management_auth_attempts/${uid}`;
+  const attemptsDoc = await getFirestoreDoc(projectId, accessToken, attemptsPath);
+  const attempts = attemptsDoc ? convertFromFirestoreFields(attemptsDoc.fields || {}) : {};
+  const now = Date.now();
+  if (Number(attempts.lockedUntil || 0) > now) throw createHttpError('تم إيقاف محاولة الدخول مؤقتاً. حاول بعد 15 دقيقة.', 429, 'management_login_locked');
+  const suppliedHash = codeRecord.pin_algo === 'pbkdf2-sha256-v1'
+    ? await computePinPbkdf2(codeRecord.pin_salt, code)
+    : await computeWebCryptoSha256(`${codeRecord.pin_salt}:${code}`);
+  if (suppliedHash !== codeRecord.pin_hash) {
+    const count = Number(attempts.count || 0) + 1;
+    const lockedUntil = count >= 5 ? now + 15 * 60 * 1000 : 0;
+    const record = { uid, count: lockedUntil ? 0 : count, lockedUntil, updatedAt: new Date().toISOString() };
+    const write = { update: { name: `projects/${projectId}/databases/(default)/documents/${attemptsPath}`, fields: convertToFirestoreFields(record) } };
+    write.currentDocument = attemptsDoc?.updateTime ? { updateTime: attemptsDoc.updateTime } : { exists: false };
+    await commitFirestoreTransaction(projectId, accessToken, null, [write]);
+    throw createHttpError('الاسم أو الكود السري غير صحيح', 401, 'invalid_management_credentials');
+  }
+  const reset = { uid, count: 0, lockedUntil: 0, updatedAt: new Date().toISOString() };
+  const resetWrite = { update: { name: `projects/${projectId}/databases/(default)/documents/${attemptsPath}`, fields: convertToFirestoreFields(reset) } };
+  resetWrite.currentDocument = attemptsDoc?.updateTime ? { updateTime: attemptsDoc.updateTime } : { exists: false };
+  await commitFirestoreTransaction(projectId, accessToken, null, [resetWrite]);
+  const displayName = String(user.displayName || user.name || name);
+  const customToken = await createFirebaseCustomToken(env, uid, displayName, role);
+  return jsonResponse({ success: true, customToken, user: { uid, displayName, role } }, 200, corsHeaders);
+}
+
 async function handleWorkerLogin(request, env, projectId, accessToken, corsHeaders) {
   const payload = await parseJsonBody(request);
   const workerName = typeof payload?.name === 'string' ? payload.name.trim() : '';
@@ -547,7 +594,7 @@ async function handleWorkerLogin(request, env, projectId, accessToken, corsHeade
   return jsonResponse({ success: true, customToken, worker: { id: workerId, name: worker.name } }, 200, corsHeaders);
 }
 
-async function createFirebaseCustomToken(env, uid, workerName) {
+async function createFirebaseCustomToken(env, uid, workerName, role = 'worker') {
   const sa = parseServiceAccount(env);
   const nowSec = Math.floor(Date.now() / 1000);
   const header = bytesToBase64Url(new TextEncoder().encode(JSON.stringify({ alg: 'RS256', typ: 'JWT' })));
@@ -555,7 +602,7 @@ async function createFirebaseCustomToken(env, uid, workerName) {
     iss: sa.client_email, sub: sa.client_email,
     aud: 'https://identitytoolkit.googleapis.com/google.identity.identitytoolkit.v1.IdentityToolkit',
     iat: nowSec, exp: nowSec + 3600, uid,
-    claims: { role: 'worker', workerId: uid, workerName: String(workerName || 'العامل').slice(0, 80) }
+    claims: { role, ...(role === 'worker' ? { workerId: uid } : {}), workerName: String(workerName || 'مستخدم').slice(0, 80) }
   })));
   const signingInput = `${header}.${payload}`;
   const key = await importPkcs8PrivateKey(sa.private_key);
