@@ -38,6 +38,13 @@ function readQueue(): QueuedMutation[] { try { return JSON.parse(localStorage.ge
 export function queuedMutationCount() { return readQueue().length; }
 export async function flushQueuedMutations() { const queue = readQueue(); if (!queue.length || !navigator.onLine) return 0; let flushed = 0; for (const item of queue) { try { await request(item.path, item.init); flushed++; } catch { break; } } if (flushed) localStorage.setItem(QUEUE_KEY, JSON.stringify(queue.slice(flushed))); return flushed; }
 
+export async function managementLogin(name: string, code: string, role: 'admin' | 'responsible'): Promise<{ customToken: string; user: { uid: string; displayName: string; role: string } }> {
+  const response = await fetch(`${BASE}/api/management-auth/login`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name, code, role }) });
+  const body = await response.json().catch(() => null);
+  if (!response.ok || !body?.success || !body?.customToken) throw new Error(body?.error || 'تعذر تسجيل الدخول.');
+  return { customToken: body.customToken, user: body.user };
+}
+
 export async function workerLogin(name: string, pin: string): Promise<{ customToken: string; worker: { id: string; name: string } }> {
   const response = await fetch(`${BASE}/api/worker-auth/login`, {
     method: 'POST',
