@@ -2220,32 +2220,40 @@ async function listFirestoreDocs(projectId, accessToken, collection, pageSize) {
 }
 
 // Convert native JS object to Firestore REST API fields
+function convertToFirestoreValue(value) {
+  if (value === null) return { nullValue: null };
+  if (typeof value === 'string') return { stringValue: value };
+  if (typeof value === 'number') return Number.isInteger(value) ? { integerValue: String(value) } : { doubleValue: value };
+  if (typeof value === 'boolean') return { booleanValue: value };
+  if (Array.isArray(value)) return { arrayValue: { values: value.map(convertToFirestoreValue) } };
+  if (typeof value === 'object') return { mapValue: { fields: convertToFirestoreFields(value) } };
+  throw new TypeError('Unsupported Firestore value type');
+}
+
 export function convertToFirestoreFields(obj) {
   const fields = {};
-  for (const [key, value] of Object.entries(obj)) {
+  for (const [key, value] of Object.entries(obj || {})) {
     if (value === undefined) continue;
-    if (typeof value === 'string') fields[key] = { stringValue: value };
-    else if (typeof value === 'number') {
-      if (Number.isInteger(value)) fields[key] = { integerValue: String(value) };
-      else fields[key] = { doubleValue: value };
-    } else if (typeof value === 'boolean') fields[key] = { booleanValue: value };
-    else if (typeof value === 'object' && value !== null) {
-      fields[key] = { mapValue: { fields: convertToFirestoreFields(value) } };
-    }
+    fields[key] = convertToFirestoreValue(value);
   }
   return fields;
 }
 
+function convertFromFirestoreValue(value) {
+  if (value.stringValue !== undefined) return value.stringValue;
+  if (value.integerValue !== undefined) return parseInt(value.integerValue, 10);
+  if (value.doubleValue !== undefined) return value.doubleValue;
+  if (value.booleanValue !== undefined) return value.booleanValue;
+  if (value.nullValue !== undefined) return null;
+  if (value.arrayValue?.values) return value.arrayValue.values.map(convertFromFirestoreValue);
+  if (value.mapValue?.fields) return convertFromFirestoreFields(value.mapValue.fields);
+  return undefined;
+}
+
 export function convertFromFirestoreFields(fields) {
   const obj = {};
-  for (const [key, valObj] of Object.entries(fields || {})) {
-    if (valObj.stringValue !== undefined) obj[key] = valObj.stringValue;
-    else if (valObj.integerValue !== undefined) obj[key] = parseInt(valObj.integerValue, 10);
-    else if (valObj.doubleValue !== undefined) obj[key] = valObj.doubleValue;
-    else if (valObj.booleanValue !== undefined) obj[key] = valObj.booleanValue;
-    else if (valObj.mapValue?.fields) {
-      obj[key] = convertFromFirestoreFields(valObj.mapValue.fields);
-    }
+  for (const [key, value] of Object.entries(fields || {})) {
+    obj[key] = convertFromFirestoreValue(value);
   }
   return obj;
 }
