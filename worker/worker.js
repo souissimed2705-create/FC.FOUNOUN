@@ -672,6 +672,12 @@ async function handleTaskProgress(request, taskId, callerUid, projectId, accessT
   if (expectedWorkerId && current.assignedWorkerId !== expectedWorkerId) {
     throw createHttpError('لا يمكنك تحديث مهمة غير مسندة إليك', 403, 'task_not_assigned');
   }
+  if (expectedWorkerId && current.status === 'pending') {
+    throw createHttpError('هذه المهمة معلّقة؛ استأنفها أولاً قبل تسجيل الإنجاز', 409, 'task_is_paused');
+  }
+  if (['completed', 'cancelled'].includes(current.status)) {
+    throw createHttpError('لا يمكن تسجيل إنجاز لمهمة مكتملة أو ملغاة', 409, 'task_not_changeable');
+  }
   const targetQuantity = Number(current.targetQuantity || 0);
   const completedQuantity = Number(current.completedQuantity || 0) + payload.quantity;
   if (!Number.isSafeInteger(targetQuantity) || targetQuantity < 1 || completedQuantity > targetQuantity) {
