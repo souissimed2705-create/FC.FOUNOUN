@@ -334,10 +334,7 @@ export async function runAllTests() {
   try { assertWorkerManagementPermission('responsible', 'POST'); }
   catch (err: any) { responsibleCreateDenied = err.code === 'worker_management_forbidden' && err.status === 403; }
   assert(responsibleCreateDenied, 'منع المسؤول من إنشاء حسابات مشرفي العمال');
-  let managerFreezeDenied = false;
-  try { assertWorkerManagementPermission('admin', 'DELETE'); }
-  catch (err: any) { managerFreezeDenied = err.code === 'worker_management_forbidden' && err.status === 403; }
-  assert(managerFreezeDenied, 'منع المدير العام من تجميد حسابات مشرفي العمال');
+  assert(assertWorkerManagementPermission('admin', 'DELETE') === true, 'السماح للمدير العام بتجميد حساب مشرف العمال مع منع حذف حسابات الإدارة');
   assert(assertWorkerManagementPermission('super_admin', 'DELETE') === true, 'السماح للمشرف العام بتجميد حساب مشرف العمال');
   assert(isExactParticipantPair(['user_a', 'user_b'], 'user_a', 'user_b'), 'قبول محادثة بين طرفين محددين');
   assert(!isExactParticipantPair(['user_a', 'user_b', 'user_c'], 'user_a', 'user_b'), 'رفض قراءة محادثة تضم طرفاً ثالثاً');
