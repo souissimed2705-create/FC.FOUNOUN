@@ -647,7 +647,8 @@ async function handleUpdateManagementAccount(request, uid, callerUid, projectId,
   if (payload.name !== undefined) {
     if (typeof payload.name !== 'string' || !payload.name.trim() || payload.name.trim().length > 80) throw createHttpError('اسم الحساب غير صالح', 400, 'invalid_management_name');
     const all = await listFirestoreDocs(projectId, accessToken, 'users', 100);
-    const duplicate = all.documents.map(d => convertFromFirestoreFields(d.fields || {})).some(user => (user.uid || user.id) !== uid && user.role === current.role && String(user.displayName || user.name || '').trim().toLocaleLowerCase() === payload.name.trim().toLocaleLowerCase());
+    const duplicate = all.documents.map(d => ({ ...convertFromFirestoreFields(d.fields || {}), uid: d.name?.split('/').pop() }))
+      .some(user => user.uid !== uid && user.role === current.role && String(user.displayName || user.name || '').trim().toLocaleLowerCase() === payload.name.trim().toLocaleLowerCase());
     if (duplicate) throw createHttpError('الاسم مستخدم في حساب آخر من النوع نفسه', 409, 'management_name_taken');
     changes.displayName = payload.name.trim(); changes.name = payload.name.trim();
   }
