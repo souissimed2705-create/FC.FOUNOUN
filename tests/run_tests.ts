@@ -30,6 +30,7 @@ import {
   assertWorkerManagementPermission,
   assertTaskManagementPermission,
   assertTaskCreationFieldsAllowed,
+  assertTaskUpdateStatusAllowed,
   assertResponsibleWorkerFieldsAllowed,
   assertSuperAdminManagementAccountsPermission,
   assertManagementAccountUpdateAllowed,
@@ -425,6 +426,22 @@ export async function runAllTests() {
 
   // 9. Worker account freeze is reversible; the record is retained, never hard-deleted.
   console.log('\n9. اختبارات تجميد حساب العامل دون حذفه:');
+  assert(assertTaskUpdateStatusAllowed('in_progress', 'pending') === true,
+    'السماح بتعليق مهمة مفتوحة أو قيد التنفيذ');
+  assert(assertTaskUpdateStatusAllowed('pending', 'in_progress') === true,
+    'السماح باستئناف المهمة المعلقة');
+  assertThrowsWithCode(
+    () => assertTaskUpdateStatusAllowed('in_progress', 'completed'),
+    'invalid_task_status',
+    'منع إغلاق المهمة مكتملة دون تسجيل كامل الإنجاز',
+    400
+  );
+  assertThrowsWithCode(
+    () => assertTaskUpdateStatusAllowed('completed', 'in_progress'),
+    'task_not_changeable',
+    'منع إعادة فتح مهمة مكتملة عبر مسار التعديل الإداري',
+    409
+  );
   assert(assertTaskCreationFieldsAllowed({ title: 'أمر إنتاج', targetQuantity: 50 }) === true,
     'السماح بإنشاء مهمة جديدة دون التلاعب بحالة الإنجاز');
   assertThrowsWithCode(
