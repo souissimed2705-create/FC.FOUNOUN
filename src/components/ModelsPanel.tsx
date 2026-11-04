@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { createShoeModel, deleteShoeModel, listShoeModels, updateShoeModel } from '../lib/modelsApi';
 import type { CreateModelPayload, ShoeCategory, ShoeModel } from '../types/models';
 import { optimizeAndEncodeImage, validateDualImageLimits } from '../utils/imageOptimizer';
@@ -22,12 +22,15 @@ export const ModelsPanel: React.FC<ModelsPanelProps> = ({ readOnly = false }) =>
   const [error, setError] = useState<string | null>(null);
   const [zoomed, setZoomed] = useState<string | null>(null);
   const [nextPageToken, setNextPageToken] = useState<string | null>(null);
+  const requestGeneration = useRef(0);
 
   const loadModels = async (reset = true) => {
+    const generation = reset ? ++requestGeneration.current : requestGeneration.current;
     setLoading(true);
     setError(null);
     try {
       const result = await listShoeModels({ search, category: category || undefined, pageSize: 50, pageToken: reset ? undefined : nextPageToken });
+      if (generation !== requestGeneration.current) return;
       setModels((current) => {
         const combined = reset ? result.models : [...current, ...result.models];
         return Array.from(new Map(combined.map((model) => [model.id, model])).values());
@@ -36,7 +39,9 @@ export const ModelsPanel: React.FC<ModelsPanelProps> = ({ readOnly = false }) =>
       setMessage(null);
       void saveOfflineSnapshot('model-catalog', reset ? result.models : [...models, ...result.models]).catch(() => undefined);
     } catch (err) {
+      if (generation !== requestGeneration.current) return;
       const cached = reset ? await readOfflineSnapshot<ShoeModel[]>('model-catalog').catch(() => null) : null;
+      if (generation !== requestGeneration.current) return;
       if (cached) {
         const normalizedSearch = search.trim().toLocaleLowerCase();
         setModels(cached.filter(model => (!category || model.category === category) && (!normalizedSearch || model.name.toLocaleLowerCase().includes(normalizedSearch))));
@@ -47,7 +52,7 @@ export const ModelsPanel: React.FC<ModelsPanelProps> = ({ readOnly = false }) =>
         setError(err instanceof Error ? err.message : 'تعذر تحميل الموديلات، ولا توجد نسخة محفوظة.');
       }
     } finally {
-      setLoading(false);
+      if (generation === requestGeneration.current) setLoading(false);
     }
   };
 
