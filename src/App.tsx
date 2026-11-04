@@ -12,6 +12,8 @@ import { WifiOff, Sparkles, Crown } from 'lucide-react';
 import { onAuthStateChanged, signOut } from 'firebase/auth';
 import {
   auth,
+  isFirebaseConfigured,
+  getFirebaseConfigurationError,
   verifySuperAdmin,
   UserProfile,
   mapAuthorizationErrorToArabic,
@@ -26,6 +28,12 @@ export default function App() {
 
   // Synchronize and verify current active session against Firestore RBAC
   useEffect(() => {
+    if (!isFirebaseConfigured()) {
+      setSessionError(getFirebaseConfigurationError());
+      setIsCheckingInitialAuth(false);
+      return;
+    }
+
     const unsubscribe = onAuthStateChanged(auth, async (user) => {
       if (user) {
         try {
@@ -64,6 +72,22 @@ export default function App() {
       setIsLoggingOut(false);
     }
   };
+
+  if (!isFirebaseConfigured()) {
+    return (
+      <div dir="rtl" className="min-h-screen bg-[#080808] text-white flex items-center justify-center p-6">
+        <main className="w-full max-w-xl rounded-2xl border border-[#D4AF37]/40 bg-[#111] p-6 text-center shadow-2xl">
+          <h1 className="mb-3 text-xl font-bold text-[#F5D77F]">يلزم ضبط اتصال Firebase</h1>
+          <p className="text-sm leading-7 text-gray-300">
+            {sessionError || 'إعداد Firebase غير مكتمل. يرجى ضبط متغيرات VITE_FIREBASE_* ثم إعادة بناء التطبيق.'}
+          </p>
+          <p className="mt-4 text-xs leading-6 text-gray-500">
+            استخدم إعداد Web الرسمي من مشروع fc-founoun في Firebase Console، ولا تضع مفاتيح Service Account في التطبيق.
+          </p>
+        </main>
+      </div>
+    );
+  }
 
   return (
     <div className="min-h-screen bg-[#080808] text-white flex flex-col justify-between relative selection:bg-[#D4AF37]/30 selection:text-[#F3E5AB]">

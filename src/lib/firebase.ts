@@ -11,18 +11,18 @@ import { getFirestore, Firestore, doc, getDoc } from 'firebase/firestore';
  */
 const rawApiKey = (import.meta.env.VITE_FIREBASE_API_KEY || '').trim();
 
-// Use a validly formatted fallback key if none is provided via env,
-// preventing Firebase Web SDK from throwing a synchronous fatal `auth/invalid-api-key` error on load.
-const activeApiKey = rawApiKey;
-
 const firebaseConfig = {
-  apiKey: activeApiKey,
+  apiKey: rawApiKey,
   authDomain: import.meta.env.VITE_FIREBASE_AUTH_DOMAIN || 'fc-founoun.firebaseapp.com',
-  projectId: 'fc-founoun',
-  storageBucket: import.meta.env.VITE_FIREBASE_STORAGE_BUCKET || 'fc-founoun.appspot.com',
-  messagingSenderId: import.meta.env.VITE_FIREBASE_MESSAGING_SENDER_ID || '',
-  appId: import.meta.env.VITE_FIREBASE_APP_ID || '',
+  projectId: (import.meta.env.VITE_FIREBASE_PROJECT_ID || 'fc-founoun').trim(),
+  storageBucket: (import.meta.env.VITE_FIREBASE_STORAGE_BUCKET || 'fc-founoun.appspot.com').trim(),
+  messagingSenderId: (import.meta.env.VITE_FIREBASE_MESSAGING_SENDER_ID || '').trim(),
+  appId: (import.meta.env.VITE_FIREBASE_APP_ID || '').trim(),
 };
+
+const missingFirebaseConfig = Object.entries(firebaseConfig)
+  .filter(([, value]) => !value)
+  .map(([key]) => key);
 
 // Initialize Firebase App safely (singleton pattern)
 let app: FirebaseApp;
@@ -56,7 +56,12 @@ export const db: Firestore = dbInstance;
 
 // Check if a real custom API key is configured
 export const isFirebaseConfigured = (): boolean => {
-  return Boolean(rawApiKey);
+  return missingFirebaseConfig.length === 0 && firebaseConfig.projectId === 'fc-founoun';
+};
+
+export const getFirebaseConfigurationError = (): string | null => {
+  if (isFirebaseConfigured()) return null;
+  return `إعداد Firebase غير مكتمل لمشروع fc-founoun. القيم الناقصة: ${missingFirebaseConfig.join(', ')}. أضفها إلى متغيرات VITE_* ثم أعد بناء التطبيق.`;
 };
 
 /**
