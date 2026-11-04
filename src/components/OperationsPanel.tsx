@@ -1,9 +1,10 @@
 import React, { useEffect, useState } from 'react';
 import { MessageCircle, Gauge } from 'lucide-react';
-import { createTask, createWorker, flushQueuedMutations, listConversation, listTasks, listWorkers, queuedMutationCount, recordProgress, sendManagementMessage, setWorkerPin, updateTask, updateWorker, listMachineCycles, getMachineCyclePhoto } from '../lib/operationsApi';
+import { createTask, createWorker, flushQueuedMutations, listTasks, listWorkers, queuedMutationCount, recordProgress, setWorkerPin, updateTask, updateWorker, listMachineCycles, getMachineCyclePhoto } from '../lib/operationsApi';
+import { PrivateMessagesPanel } from './PrivateMessagesPanel';
 import { listShoeModels } from '../lib/modelsApi';
 import type { ShoeModel } from '../types/models';
-import type { ChatMessage, TaskRecord, WorkerRecord, MachineCycleRecord } from '../types/operations';
+import type { TaskRecord, WorkerRecord, MachineCycleRecord } from '../types/operations';
 import type { UserProfile } from '../lib/firebase';
 
 type Section = 'workers' | 'tasks' | 'messages' | 'cycles';
@@ -33,9 +34,6 @@ export const OperationsPanel: React.FC<Props> = ({ initialSection, admin }) => {
   const [editingTaskId, setEditingTaskId] = useState<string | null>(null);
   const [progressId, setProgressId] = useState('');
   const [progressQuantity, setProgressQuantity] = useState('');
-  const [selectedWorkerId, setSelectedWorkerId] = useState('');
-  const [messages, setMessages] = useState<ChatMessage[]>([]);
-  const [draft, setDraft] = useState('');
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const [pending, setPending] = useState(queuedMutationCount());
@@ -56,15 +54,7 @@ export const OperationsPanel: React.FC<Props> = ({ initialSection, admin }) => {
     }
   };
 
-  const refreshConversation = async (workerId = selectedWorkerId) => {
-    if (!workerId) { setMessages([]); return; }
-    try {
-      const result = await listConversation(workerId);
-      setMessages(result.data || []);
-    } catch (e) {
-      setError(e instanceof Error ? e.message : 'تعذر تحميل المحادثة.');
-    }
-  };
+
 
   useEffect(() => {
     void refresh();
@@ -73,12 +63,7 @@ export const OperationsPanel: React.FC<Props> = ({ initialSection, admin }) => {
     return () => window.removeEventListener('online', handler);
   }, []);
 
-  useEffect(() => {
-    if (section !== 'messages' || !selectedWorkerId) return;
-    void refreshConversation(selectedWorkerId);
-    const timer = window.setInterval(() => void refreshConversation(selectedWorkerId), 7000);
-    return () => window.clearInterval(timer);
-  }, [section, selectedWorkerId]);
+
 
   const runMutation = async (fn: () => Promise<unknown>, fallback?: { path: string; init: RequestInit }) => {
     setError(null); setNotice(null);
@@ -135,18 +120,7 @@ export const OperationsPanel: React.FC<Props> = ({ initialSection, admin }) => {
     setProgressQuantity('');
   };
 
-  const sendMessage = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!selectedWorkerId || !draft.trim()) return;
-    setBusy(true); setError(null);
-    try {
-      await sendManagementMessage(selectedWorkerId, draft.trim());
-      setDraft('');
-      await refreshConversation(selectedWorkerId);
-    } catch (e) {
-      setError(e instanceof Error ? e.message : 'تعذر إرسال الرسالة.');
-    } finally { setBusy(false); }
-  };
+
 
   const taskStatusLabel = (status: TaskRecord['status']) => ({
     open: 'جديدة', in_progress: 'قيد التنفيذ', pending: 'معلّقة', completed: 'مكتملة', cancelled: 'ملغاة'
@@ -240,23 +214,6 @@ export const OperationsPanel: React.FC<Props> = ({ initialSection, admin }) => {
 
     {selectedCyclePhoto && <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/90 p-4" role="dialog" aria-modal="true" aria-label="صورة عداد المكينة" onClick={() => setSelectedCyclePhoto(null)}><div className="max-h-[90vh] max-w-3xl rounded-xl border border-[#D4AF37]/40 bg-[#111] p-3" onClick={e => e.stopPropagation()}><div className="mb-2 flex justify-between"><b className="text-[#F5D77F]">صورة عداد المكينة</b><button className="secondary-button" onClick={() => setSelectedCyclePhoto(null)}>إغلاق</button></div><img src={selectedCyclePhoto.photo} alt="صورة عداد المكينة" className="max-h-[78vh] w-auto rounded-lg object-contain" /></div></div>}
 
-    {section === 'messages' && <div className="space-y-3">
-      <h3 className="font-bold text-[#F5D77F]">المحادثات الخاصة مع العمال</h3>
-      <select className="field w-full" value={selectedWorkerId} onChange={e => setSelectedWorkerId(e.target.value)}>
-        <option value="">اختر العامل لفتح المحادثة</option>
-        {workers.map(w => <option key={w.id} value={w.id}>{w.name} {w.status === 'inactive' ? '(مجمّد)' : ''}</option>)}
-      </select>
-      <div className="min-h-48 max-h-80 overflow-y-auto space-y-2 rounded-xl border border-white/10 bg-[#080808] p-3">
-        {!messages.length && <p className="text-center text-sm text-gray-500 py-8">لا توجد رسائل بعد.</p>}
-        {messages.map(msg => <div key={msg.id} className={'max-w-[88%] rounded-xl p-3 ' + (msg.senderRole === 'worker' ? 'ml-auto bg-white/10' : 'mr-auto bg-[#3A2E12]')}>
-          <div className="text-[11px] text-[#F5D77F] mb-1">{msg.senderName} · {new Date(msg.createdAt).toLocaleString('ar-TN')}</div>
-          <p className="text-sm whitespace-pre-wrap break-words">{msg.text}</p>
-        </div>)}
-      </div>
-      <form onSubmit={sendMessage} className="flex gap-2">
-        <input className="field min-w-0 flex-1" placeholder="اكتب رسالة للعامل..." value={draft} onChange={e => setDraft(e.target.value)} disabled={!selectedWorkerId || busy} />
-        <button className="gold-button" disabled={!selectedWorkerId || busy || !draft.trim()}>إرسال</button>
-      </form>
-    </div>}
+    {section === 'messages' && <PrivateMessagesPanel />}
   </section>;
 };
