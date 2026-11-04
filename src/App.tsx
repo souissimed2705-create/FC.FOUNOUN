@@ -6,6 +6,8 @@
 import React, { useState, useEffect } from 'react';
 import { AdminLoginForm } from './components/AdminLoginForm';
 import { AdminDashboard } from './components/AdminDashboard';
+import { WorkerLogin } from './components/WorkerLogin';
+import { WorkerDashboard } from './components/WorkerDashboard';
 import { PWAInstallBadge } from './components/PWAInstallBadge';
 import { useOnlineStatus } from './hooks/useOnlineStatus';
 import { WifiOff, Sparkles, Crown } from 'lucide-react';
@@ -22,6 +24,8 @@ import {
 export default function App() {
   const isOnline = useOnlineStatus();
   const [verifiedAdmin, setVerifiedAdmin] = useState<UserProfile | null>(null);
+  const [verifiedWorker, setVerifiedWorker] = useState<{ id: string; name: string } | null>(null);
+  const [loginMode, setLoginMode] = useState<'admin' | 'worker'>('admin');
   const [isCheckingInitialAuth, setIsCheckingInitialAuth] = useState(true);
   const [sessionError, setSessionError] = useState<string | null>(null);
   const [isLoggingOut, setIsLoggingOut] = useState(false);
@@ -37,22 +41,27 @@ export default function App() {
     const unsubscribe = onAuthStateChanged(auth, async (user) => {
       if (user) {
         try {
-          // Verify role and status in users/{uid}
-          const profile = await verifySuperAdmin(user.uid);
-          setVerifiedAdmin(profile);
-          setSessionError(null);
+          const tokenResult = await user.getIdTokenResult();
+          if (tokenResult.claims.role === 'worker' && tokenResult.claims.workerId === user.uid) {
+            setVerifiedWorker({ id: user.uid, name: String(tokenResult.claims.workerName || 'العامل') });
+            setVerifiedAdmin(null);
+            setSessionError(null);
+          } else {
+            const profile = await verifySuperAdmin(user.uid);
+            setVerifiedAdmin(profile);
+            setVerifiedWorker(null);
+            setSessionError(null);
+          }
         } catch (err: unknown) {
-          // If doc missing, wrong role, or inactive -> immediately signOut
           await signOut(auth);
           setVerifiedAdmin(null);
-
+          setVerifiedWorker(null);
           const errorObj = err as { message?: string; code?: string };
-          setSessionError(
-            mapAuthorizationErrorToArabic(errorObj?.message || errorObj?.code || '')
-          );
+          setSessionError(mapAuthorizationErrorToArabic(errorObj?.message || errorObj?.code || ''));
         }
       } else {
         setVerifiedAdmin(null);
+        setVerifiedWorker(null);
       }
       setIsCheckingInitialAuth(false);
     });
@@ -65,6 +74,7 @@ export default function App() {
     try {
       await signOut(auth);
       setVerifiedAdmin(null);
+      setVerifiedWorker(null);
       setSessionError(null);
     } catch (err) {
       console.error('Logout error:', err);
@@ -143,14 +153,10 @@ export default function App() {
             </span>
           </div>
         ) : verifiedAdmin ? (
-          // Authorized Admin Dashboard
-          <AdminDashboard
-            admin={verifiedAdmin}
-            onLogout={handleLogout}
-            isLoggingOut={isLoggingOut}
-          />
+          <AdminDashboard admin={verifiedAdmin} onLogout={handleLogout} isLoggingOut={isLoggingOut} />
+        ) : verifiedWorker ? (
+          <WorkerDashboard worker={verifiedWorker} />
         ) : (
-          // Admin Login Form
           <div className="w-full max-w-md mx-auto flex flex-col items-center">
             {/* Brand Logo & Presentation */}
             <div className="text-center mb-6 sm:mb-8 select-none">
@@ -177,12 +183,13 @@ export default function App() {
               </div>
             </div>
 
-            {/* Admin Login Form Component */}
-            <AdminLoginForm
-              onSuccess={(admin) => setVerifiedAdmin(admin)}
-              externalError={sessionError}
-              onClearExternalError={() => setSessionError(null)}
-            />
+            <div className="mb-3 grid w-full grid-cols-2 gap-2 rounded-xl border border-white/10 bg-[#111] p-1">
+              <button className={`tab-button ${loginMode === 'admin' ? 'tab-active' : ''}`} onClick={() => setLoginMode('admin')}>دخول المشرف</button>
+              <button className={`tab-button ${loginMode === 'worker' ? 'tab-active' : ''}`} onClick={() => setLoginMode('worker')}>دخول العامل</button>
+            </div>
+            {loginMode === 'admin' ? (
+              <AdminLoginForm onSuccess={(admin) => setVerifiedAdmin(admin)} externalError={sessionError} onClearExternalError={() => setSessionError(null)} />
+            ) : <WorkerLogin />}
           </div>
         )}
       </main>
