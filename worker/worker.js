@@ -403,12 +403,23 @@ async function handleListResource(request, resource, projectId, accessToken, cor
 
 async function handleCreateResource(request, resource, callerUid, projectId, accessToken, corsHeaders, callerRole = 'super_admin') {
   const payload = await parseJsonBody(request);
-  if (resource === 'tasks') assertTaskCreationFieldsAllowed(payload);
-  validateResourcePayload(payload, resource, true);
-  if (resource === 'workers') assertResponsibleWorkerFieldsAllowed(callerRole, payload);
-  const clientMutationId = payload.clientMutationId || null;
+  const workerPin = resource === 'workers' ? payload?.pin : undefined;
+  if (resource === 'workers') {
+    if (workerPin !== undefined && callerRole !== 'super_admin') {
+      throw createHttpError('تعيين PIN لمشرف العمال من اختصاص المشرف العام فقط', 403, 'worker_pin_super_admin_only');
+    }
+    if (workerPin !== undefined && (typeof workerPin !== 'string' || !/^\\d{6}$/.test(workerPin))) {
+      throw createHttpError('PIN يجب أن يتكون من 6 أرقام بالضبط', 400, 'invalid_pin');
+    }
+  }
+  const resourcePayload = resource === 'workers' ? { ...payload } : payload;
+  if (resource === 'workers') delete resourcePayload.pin;
+  if (resource === 'tasks') assertTaskCreationFieldsAllowed(resourcePayload);
+  validateResourcePayload(resourcePayload, resource, true);
+  if (resource === 'workers') assertResponsibleWorkerFieldsAllowed(callerRole, resourcePayload);
+  const clientMutationId = resourcePayload.clientMutationId || null;
   const id = buildResourceCreationId(resource, clientMutationId);
-  const safePayload = { ...payload };
+  const safePayload = { ...resourcePayload };
   delete safePayload.clientMutationId;
   if (clientMutationId) {
     const existingDoc = await getFirestoreDoc(projectId, accessToken, `${resource}/${id}`);
@@ -416,6 +427,16 @@ async function handleCreateResource(request, resource, callerUid, projectId, acc
       const existing = convertFromFirestoreFields(existingDoc.fields || {});
       if (!isSameResourceCreation(existing, safePayload, resource, clientMutationId, callerUid)) {
         throw createHttpError('معرّف العملية مستخدم لإنشاء مورد مختلف أو تابع لمستخدم آخر', 409, 'creation_mutation_conflict');
+      }
+      // If the original response was lost after worker creation, complete the PIN write on retry without storing plaintext.
+      if (resource === 'workers' && callerRole === 'super_admin' && workerPin) {
+        const existingPin = await getFirestoreDoc(projectId, accessToken, `worker_pins/${id}`);
+        if (!existingPin) {
+          const salt = bytesToBase64Url(crypto.getRandomValues(new Uint8Array(16)));
+          const pinHash = await computePinPbkdf2(salt, workerPin);
+          const pinRecord = { workerId: id, pin_hash: pinHash, pin_salt: salt, pin_algo: 'pbkdf2-sha256-v1', updatedBy: callerUid, updatedAt: new Date().toISOString() };
+          await commitFirestoreTransaction(projectId, accessToken, null, [{ update: { name: `projects/${projectId}/databases/(default)/documents/worker_pins/${id}`, fields: convertToFirestoreFields(pinRecord) }, currentDocument: { exists: false } }]);
+        }
       }
       const existingResponse = resource === 'workers' ? sanitizeWorkerOutputForRole(existing, callerRole) : sanitizeResourceOutput(existing, resource);
       return jsonResponse({ success: true, [resource === 'workers' ? 'worker' : 'task']: existingResponse, duplicate: true }, 200, corsHeaders);
@@ -452,6 +473,15 @@ async function handleCreateResource(request, resource, callerUid, projectId, acc
     const slotPath = workerMachineSlotPath(record.machineNumber, record.shift);
     const slotDoc = await getFirestoreDoc(projectId, accessToken, slotPath);
     writes.push(buildWorkerMachineReservationWrite(projectId, id, record.machineNumber, record.shift, slotDoc, true));
+  }
+  if (resource === 'workers' && callerRole === 'super_admin' && workerPin) {
+    const salt = bytesToBase64Url(crypto.getRandomValues(new Uint8Array(16)));
+    const pinHash = await computePinPbkdf2(salt, workerPin);
+    const pinRecord = { workerId: id, pin_hash: pinHash, pin_salt: salt, pin_algo: 'pbkdf2-sha256-v1', updatedBy: callerUid, updatedAt: now };
+    writes.push({
+      update: { name: `projects/${projectId}/databases/(default)/documents/worker_pins/${id}`, fields: convertToFirestoreFields(pinRecord) },
+      currentDocument: { exists: false }
+    });
   }
   try {
     await commitFirestoreTransaction(projectId, accessToken, null, writes);
