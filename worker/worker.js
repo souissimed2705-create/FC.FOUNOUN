@@ -2311,7 +2311,7 @@ async function commitFirestoreTransaction(projectId, accessToken, transactionId,
   if (!resp.ok) {
     const errMsg = resData?.error?.message || 'فشل تثبيت المعاملة الذرية';
     if (errMsg.includes('ALREADY_EXISTS') || errMsg.includes('ABORTED') || errMsg.includes('FAILED_PRECONDITION')) {
-      throw createHttpError('تعارض في الحجز أو أن اسم الموديل محجوز بالفعل لموديل آخر', 409, 'conflict');
+      throw createHttpError('تعارضت العملية مع تعديل متزامن؛ حدّث البيانات ثم حاول مجدداً', 409, 'conflict');
     }
     throw createHttpError(`فشل إتمام المعاملة: ${errMsg}`, 500, 'tx_commit_failed');
   }
