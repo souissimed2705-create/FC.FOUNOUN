@@ -422,6 +422,7 @@ async function handleUpdateTaskCollection(request, callerUid, projectId, accessT
   return handleUpdateResource(syntheticRequest, 'tasks', id, callerUid, projectId, accessToken, corsHeaders);
 }
 
+/** @param {string} role @param {string} method @param {string | null} [action=null] */
 export function assertWorkerManagementPermission(role, method, action = null) {
   const isReadOnlyDirectoryRequest = method === 'GET' && action !== 'pin';
   if (role !== 'super_admin' && !isReadOnlyDirectoryRequest) {
