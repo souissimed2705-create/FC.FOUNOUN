@@ -31,6 +31,8 @@ import {
   assertSuperAdminManagementAccountsPermission,
   assertManagementAccountUpdateAllowed,
   buildResponsibleShiftReservationWrite,
+  buildWorkerMachineReservationWrite,
+  workerMachineSlotPath,
   isExactParticipantPair,
   firestoreDocumentId,
   isOriginAllowed,
@@ -385,6 +387,38 @@ export async function runAllTests() {
     'تحرير الوردية بتحديث مشروط يمنع الكتابة فوق حجز أحدث');
   assert(buildResponsibleShiftReservationWrite('test-project', 'mgr_second', 'day', occupiedDaySlot, false) === null,
     'عدم تحرير حجز يخص مسؤولاً آخر');
+
+  // Atomic worker machine/shift reservations.
+  console.log('\\n9. اختبارات حجز المكينة والوردية ذرياً:');
+  const workerSlotPath = 'projects/test-project/databases/(default)/documents/worker_machine_slots/m1_day';
+  const firstWorkerSlot: any = buildWorkerMachineReservationWrite('test-project', 'wkr_first', 1, 'day', null, true);
+  assert(workerSlotPath === firstWorkerSlot.update.name && firstWorkerSlot.currentDocument.exists === false,
+    'إنشاء حجز المكينة والوردية بشرط عدم وجود حجز سابق');
+  assert(workerMachineSlotPath(3, 'night') === 'worker_machine_slots/m3_night',
+    'تكوين معرّف حجز فريد لكل مكينة ووردية');
+  const occupiedWorkerSlot = {
+    updateTime: '2026-11-04T10:00:00.000000Z',
+    fields: convertToFirestoreFields({ workerId: 'wkr_first', machineNumber: 1, shift: 'day', status: 'active' })
+  };
+  assertThrowsWithCode(
+    () => buildWorkerMachineReservationWrite('test-project', 'wkr_second', 1, 'day', occupiedWorkerSlot, true),
+    'machine_shift_already_assigned',
+    'رفض حجز مكينة ووردية نشطتين لعامل آخر',
+    409
+  );
+  const releaseWorkerSlot: any = buildWorkerMachineReservationWrite('test-project', 'wkr_first', 1, 'day', occupiedWorkerSlot, false);
+  assert(releaseWorkerSlot.currentDocument.updateTime === occupiedWorkerSlot.updateTime &&
+    (convertFromFirestoreFields(releaseWorkerSlot.update.fields) as any).status === 'inactive',
+    'تحرير الحجز بتحديث مشروط على النسخة الحالية');
+  assert(buildWorkerMachineReservationWrite('test-project', 'wkr_second', 1, 'day', occupiedWorkerSlot, false) === null,
+    'منع عامل من تحرير حجز يخص عاملاً آخر');
+  const inactiveWorkerSlot = {
+    updateTime: '2026-11-04T11:00:00.000000Z',
+    fields: convertToFirestoreFields({ workerId: 'wkr_first', machineNumber: 1, shift: 'day', status: 'inactive' })
+  };
+  const reuseWorkerSlot: any = buildWorkerMachineReservationWrite('test-project', 'wkr_second', 1, 'day', inactiveWorkerSlot, true);
+  assert(reuseWorkerSlot.currentDocument.updateTime === inactiveWorkerSlot.updateTime,
+    'السماح بإعادة استخدام حجز محرر مع شرط updateTime');
 
   // 9. Worker account freeze is reversible; the record is retained, never hard-deleted.
   console.log('\n9. اختبارات تجميد حساب العامل دون حذفه:');
