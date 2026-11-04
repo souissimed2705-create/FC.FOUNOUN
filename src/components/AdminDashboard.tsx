@@ -3,9 +3,10 @@ import { Home, ClipboardList, Crown, LogOut, Package, ShieldCheck, Users, UserCo
 import { UserProfile } from '../lib/firebase';
 import { ModelsPanel } from './ModelsPanel';
 import { OperationsPanel } from './OperationsPanel';
+import { ManagementAccountsPanel } from './ManagementAccountsPanel';
 
 interface AdminDashboardProps { admin: UserProfile; onLogout: () => Promise<void>; isLoggingOut: boolean; }
-type Page = 'home' | 'models' | 'tasks' | 'supervisor' | 'workers';
+type Page = 'home' | 'models' | 'tasks' | 'supervisor' | 'workers' | 'accounts';
 
 export const AdminDashboard: React.FC<AdminDashboardProps> = ({ admin, onLogout, isLoggingOut }) => {
   const [page, setPage] = useState<Page>('home');
@@ -24,6 +25,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ admin, onLogout,
     tasks: 'المهام وأوامر الإنتاج',
     supervisor: 'مركز المشرف',
     workers: 'إدارة العمال ورموز الدخول',
+    accounts: 'حسابات المديرين والمسؤولين',
   };
 
   return <div className="w-full max-w-5xl mx-auto space-y-5" dir="rtl">
@@ -77,10 +79,11 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ admin, onLogout,
       <button onClick={() => go('workers')} className="flex w-full items-center gap-3 rounded-xl border border-white/10 bg-[#090909] p-4 text-right hover:border-[#D4AF37]/60">
         <Users className="h-6 w-6 text-[#F5D77F]" /><span><b className="block text-sm">إدارة العمال ورموز PIN</b><small className="text-xs text-gray-400">إضافة العمال وتعديل بياناتهم ورموزهم وتجميدهم وإعادة تفعيلهم.</small></span>
       </button>
-      <div className="flex w-full items-center gap-3 rounded-xl border border-white/10 bg-[#090909] p-4 opacity-60">
-        <UserCog className="h-6 w-6 text-gray-400" /><span><b className="block text-sm text-gray-200">إدارة حسابات المسؤولين</b><small className="text-xs text-gray-500">هذه الوظيفة لم تُنفّذ بعد؛ لن نعرضها كأنها تعمل قبل إكمال صلاحياتها الخلفية.</small></span>
-      </div>
+      <button onClick={() => go('accounts')} className="flex w-full items-center gap-3 rounded-xl border border-white/10 bg-[#090909] p-4 text-right hover:border-[#D4AF37]/60">
+        <UserCog className="h-6 w-6 text-[#F5D77F]" /><span><b className="block text-sm text-gray-200">إدارة حسابات المديرين والمسؤولين</b><small className="text-xs text-gray-400">إنشاء الحسابات وتعيين الأكواد السرية والتجميد وإعادة التفعيل.</small></span>
+      </button>
     </section>}
     {page === 'workers' && isSupervisor && <OperationsPanel initialSection="workers" admin={admin} />}
+    {page === 'accounts' && isSupervisor && <ManagementAccountsPanel />}
   </div>;
 };
