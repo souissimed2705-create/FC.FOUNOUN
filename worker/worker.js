@@ -321,8 +321,8 @@ async function dispatchManagementRoute(request, route, callerUid, callerRole, pr
 }
 
 const RESOURCE_FIELDS = {
-  workers: ['name', 'phone', 'email', 'status', 'notes', 'machineNumber', 'shift'],
-  tasks: ['title', 'description', 'status', 'priority', 'assignedWorkerId', 'assignedWorkerName', 'machineNumber', 'shift', 'modelId', 'modelName', 'modelCategory', 'targetQuantity', 'completedQuantity', 'dueDate'],
+  workers: ['name', 'phone', 'email', 'status', 'notes', 'machineNumber', 'shift', 'clientMutationId'],
+  tasks: ['title', 'description', 'status', 'priority', 'assignedWorkerId', 'assignedWorkerName', 'machineNumber', 'shift', 'modelId', 'modelName', 'modelCategory', 'targetQuantity', 'completedQuantity', 'dueDate', 'clientMutationId'],
 };
 
 function validateResourcePayload(payload, resource, isCreate) {
@@ -348,6 +348,9 @@ function validateResourcePayload(payload, resource, isCreate) {
         throw createHttpError('الكمية المطلوبة يجب أن تكون عدداً صحيحاً موجباً', 400, 'invalid_target_quantity');
       }
     }
+  }
+  if (payload.clientMutationId !== undefined && (typeof payload.clientMutationId !== 'string' || !/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(payload.clientMutationId))) {
+    throw createHttpError('معرّف العملية غير صالح', 400, 'invalid_mutation_id');
   }
   for (const [key, value] of Object.entries(payload)) {
     if (!['string', 'number', 'boolean'].includes(typeof value) || (typeof value === 'string' && value.length > 2000)) {
@@ -403,6 +406,21 @@ async function handleCreateResource(request, resource, callerUid, projectId, acc
   if (resource === 'tasks') assertTaskCreationFieldsAllowed(payload);
   validateResourcePayload(payload, resource, true);
   if (resource === 'workers') assertResponsibleWorkerFieldsAllowed(callerRole, payload);
+  const clientMutationId = payload.clientMutationId || null;
+  const id = buildResourceCreationId(resource, clientMutationId);
+  const safePayload = { ...payload };
+  delete safePayload.clientMutationId;
+  if (clientMutationId) {
+    const existingDoc = await getFirestoreDoc(projectId, accessToken, `${resource}/${id}`);
+    if (existingDoc) {
+      const existing = convertFromFirestoreFields(existingDoc.fields || {});
+      if (!isSameResourceCreation(existing, safePayload, resource, clientMutationId, callerUid)) {
+        throw createHttpError('معرّف العملية مستخدم لإنشاء مورد مختلف أو تابع لمستخدم آخر', 409, 'creation_mutation_conflict');
+      }
+      const existingResponse = resource === 'workers' ? sanitizeWorkerOutputForRole(existing, callerRole) : sanitizeResourceOutput(existing, resource);
+      return jsonResponse({ success: true, [resource === 'workers' ? 'worker' : 'task']: existingResponse, duplicate: true }, 200, corsHeaders);
+    }
+  }
   if (resource === 'workers') {
     const existingWorkers = await listAllFirestoreDocs(projectId, accessToken, 'workers', 100, 500);
     const duplicateName = existingWorkers.documents.map(doc => convertFromFirestoreFields(doc.fields || {})).some(worker => worker.status === 'active' && String(worker.name || '').trim().toLocaleLowerCase() === payload.name.trim().toLocaleLowerCase());
@@ -414,7 +432,6 @@ async function handleCreateResource(request, resource, callerUid, projectId, acc
       if (occupied) throw createHttpError('هذه المكينة والوردية مرتبطتان بالفعل بمشرف عمال نشط', 409, 'machine_shift_already_assigned');
     }
   }
-  const id = `${resource === 'workers' ? 'wkr' : 'tsk'}_${crypto.randomUUID().replace(/-/g, '')}`;
   const now = new Date().toISOString();
   const defaults = resource === 'workers' ? { status: 'active' } : { status: 'open', completedQuantity: 0 };
   let taskDetails = {};
@@ -429,14 +446,28 @@ async function handleCreateResource(request, resource, callerUid, projectId, acc
     if (![1, 2, 3].includes(assignedWorker.machineNumber) || !['day', 'night'].includes(assignedWorker.shift)) throw createHttpError('حساب مشرف العمال غير مربوط بمكينة ووردية', 409, 'worker_machine_assignment_missing');
     taskDetails = { assignedWorkerName: assignedWorker.name, machineNumber: assignedWorker.machineNumber, shift: assignedWorker.shift, modelId: payload.modelId, modelName: model.name, modelCategory: model.category };
   }
-  const record = { id, ...defaults, ...payload, ...taskDetails, createdBy: callerUid, createdAt: now, updatedAt: now };
+  const record = { id, ...defaults, ...safePayload, ...taskDetails, createdBy: callerUid, createdAt: now, updatedAt: now, ...(clientMutationId ? { creationMutationId: clientMutationId } : {}) };
   const writes = [{ update: { name: `projects/${projectId}/databases/(default)/documents/${resource}/${id}`, fields: convertToFirestoreFields(record) }, currentDocument: { exists: false } }];
   if (resource === 'workers' && record.status === 'active') {
     const slotPath = workerMachineSlotPath(record.machineNumber, record.shift);
     const slotDoc = await getFirestoreDoc(projectId, accessToken, slotPath);
     writes.push(buildWorkerMachineReservationWrite(projectId, id, record.machineNumber, record.shift, slotDoc, true));
   }
-  await commitFirestoreTransaction(projectId, accessToken, null, writes);
+  try {
+    await commitFirestoreTransaction(projectId, accessToken, null, writes);
+  } catch (err) {
+    if (clientMutationId) {
+      const racedDoc = await getFirestoreDoc(projectId, accessToken, `${resource}/${id}`);
+      if (racedDoc) {
+        const raced = convertFromFirestoreFields(racedDoc.fields || {});
+        if (isSameResourceCreation(raced, safePayload, resource, clientMutationId, callerUid)) {
+          const racedResponse = resource === 'workers' ? sanitizeWorkerOutputForRole(raced, callerRole) : sanitizeResourceOutput(raced, resource);
+          return jsonResponse({ success: true, [resource === 'workers' ? 'worker' : 'task']: racedResponse, duplicate: true }, 200, corsHeaders);
+        }
+      }
+    }
+    throw err;
+  }
   const responseRecord = resource === 'workers' ? sanitizeWorkerOutputForRole(record, callerRole) : record;
   return jsonResponse({ success: true, [resource === 'workers' ? 'worker' : 'task']: responseRecord }, 201, corsHeaders);
 }
@@ -548,6 +579,28 @@ async function handleUpdateTaskCollection(request, callerUid, projectId, accessT
 }
 
 /** @param {string} role @param {string} method @param {string | null} [action=null] */
+export function buildResourceCreationId(resource, clientMutationId) {
+  if (!['workers', 'tasks'].includes(resource)) throw createHttpError('نوع المورد غير صالح', 400, 'invalid_resource');
+  const prefix = resource === 'workers' ? 'wkr' : 'tsk';
+  const mutation = clientMutationId || crypto.randomUUID();
+  if (typeof mutation !== 'string' || !/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(mutation)) {
+    throw createHttpError('معرّف العملية غير صالح', 400, 'invalid_mutation_id');
+  }
+  return `${prefix}_${mutation.replace(/-/g, '')}`;
+}
+
+export function isSameResourceCreation(existing, payload, resource, clientMutationId, callerUid) {
+  if (!existing || existing.creationMutationId !== clientMutationId || existing.createdBy !== callerUid) return false;
+  const fields = resource === 'workers'
+    ? ['name', 'phone', 'machineNumber', 'shift', 'status']
+    : ['title', 'description', 'assignedWorkerId', 'modelId', 'targetQuantity', 'dueDate'];
+  const defaultValues = resource === 'workers' ? { status: 'active' } : { status: 'open' };
+  return fields.every(key => {
+    const requested = payload[key] === undefined ? defaultValues[key] : payload[key];
+    return requested === undefined || existing[key] === requested;
+  });
+}
+
 export function assertTaskUpdateStatusAllowed(currentStatus, requestedStatus) {
   if (['completed', 'cancelled'].includes(currentStatus)) {
     throw createHttpError('المهمة المكتملة أو الملغاة مغلقة ولا تقبل تعديلات أخرى', 409, 'task_not_changeable');
@@ -570,7 +623,7 @@ export function assertTaskCreationFieldsAllowed(payload) {
 
 export function assertResponsibleWorkerFieldsAllowed(role, payload) {
   if (role !== 'responsible') return true;
-  const allowed = ['name', 'machineNumber', 'shift', 'status'];
+  const allowed = ['name', 'machineNumber', 'shift', 'status', 'clientMutationId'];
   const forbidden = Object.keys(payload || {}).filter(key => !allowed.includes(key));
   if (forbidden.length) {
     throw createHttpError('المسؤول لا يستطيع إدخال أو تعديل بيانات العامل خارج الاسم والمكينة والوردية والحالة', 403, 'responsible_worker_field_forbidden');
