@@ -1,4 +1,5 @@
 import React, { useEffect, useState } from 'react';
+import { MessageCircle } from 'lucide-react';
 import { createTask, createWorker, flushQueuedMutations, listConversation, listTasks, listWorkers, queuedMutationCount, recordProgress, sendManagementMessage, setWorkerPin, updateWorker } from '../lib/operationsApi';
 import { listShoeModels } from '../lib/modelsApi';
 import type { ShoeModel } from '../types/models';
@@ -139,7 +140,7 @@ export const OperationsPanel: React.FC<Props> = ({ initialSection, admin }) => {
 
   return <section className="w-full rounded-2xl border border-white/10 bg-[#111] p-5 space-y-4" dir="rtl">
     <div className="flex flex-wrap gap-2 mb-2">
-      {tabs.map(tab => <button key={tab.id} className={'tab-button ' + (section === tab.id ? 'tab-active' : '')} onClick={() => setSection(tab.id)}>{tab.label}</button>)}
+      {tabs.map(tab => <button key={tab.id} className={'tab-button ' + (section === tab.id ? 'tab-active' : '')} onClick={() => setSection(tab.id)}>{tab.id === 'messages' && <MessageCircle className="w-4 h-4" />}{tab.label}</button>)}
       <button className="secondary-button mr-auto" onClick={() => void refresh()}>تحديث</button>
     </div>
     {pending > 0 && <div className="rounded-lg border border-amber-500/40 bg-amber-950/30 p-3 text-xs text-amber-200">عمليات تنتظر المزامنة: {pending}</div>}
