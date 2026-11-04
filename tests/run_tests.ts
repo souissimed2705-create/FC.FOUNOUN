@@ -501,7 +501,7 @@ export async function runAllTests() {
     403
   );
   assert(assertWorkerManagementPermission('admin', 'POST') === true, 'السماح للمدير العام بإضافة مشرفي العمال');
-  assert(assertWorkerManagementPermission('admin', 'PUT', 'pin') === true, 'السماح للمدير العام بتعيين كود دخول مشرف العمال');
+  assertThrowsWithCode(() => assertWorkerManagementPermission('admin', 'PUT', 'pin'), 'worker_pin_super_admin_only', 'منع المدير العام من تعيين PIN مشرف العمال', 403);
   assert(assertWorkerManagementPermission('admin', 'GET') === true, 'السماح للمدير العام بقراءة قائمة مشرفي العمال');
   assert(assertWorkerManagementPermission('responsible', 'GET') === true, 'السماح للمسؤول بعرض قائمة مشرفي العمال');
   assert(assertWorkerManagementPermission('responsible', 'POST') === true, 'السماح للمسؤول بإضافة مشرفي العمال');
@@ -529,7 +529,7 @@ export async function runAllTests() {
     403
   );
   assert(assertWorkerManagementPermission('responsible', 'PUT') === true, 'السماح للمسؤول بتعديل بيانات وتعيين مشرف العمال');
-  assert(assertWorkerManagementPermission('responsible', 'PUT', 'pin') === true, 'السماح للمسؤول بتغيير كود دخول مشرف العمال');
+  assertThrowsWithCode(() => assertWorkerManagementPermission('responsible', 'PUT', 'pin'), 'worker_pin_super_admin_only', 'منع المسؤول من تعيين PIN مشرف العمال', 403);
   assert(assertWorkerManagementPermission('responsible', 'DELETE') === true, 'السماح للمسؤول بتجميد حساب مشرف العمال دون حذفه نهائياً');
   assert(assertWorkerManagementPermission('admin', 'DELETE') === true, 'السماح للمدير العام بتجميد حساب مشرف العمال مع منع حذف حسابات الإدارة');
   assert(assertWorkerManagementPermission('super_admin', 'DELETE') === true, 'السماح للمشرف العام بتجميد حساب مشرف العمال');
