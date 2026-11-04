@@ -884,8 +884,8 @@ export function firestoreDocumentId(documentName) {
 
 async function handleListContacts(callerUid, projectId, accessToken, corsHeaders) {
   const [usersResult, workersResult] = await Promise.all([
-    listFirestoreDocs(projectId, accessToken, 'users', 100),
-    listFirestoreDocs(projectId, accessToken, 'workers', 100)
+    listAllFirestoreDocs(projectId, accessToken, 'users', 100, 500),
+    listAllFirestoreDocs(projectId, accessToken, 'workers', 100, 500)
   ]);
   // Firestore REST documents always carry their document path, even when
   // older profile records do not contain a duplicated uid/id field.
@@ -914,14 +914,18 @@ async function readDirectConversation(conversationId, projectId, accessToken) {
       structuredQuery: {
         from: [{ collectionId: 'messages' }],
         where: { fieldFilter: { field: { fieldPath: 'conversationId' }, op: 'EQUAL', value: { stringValue: conversationId } } },
+        orderBy: [{ field: { fieldPath: 'createdAt' }, direction: 'DESCENDING' }],
         limit: 100
       }
     })
   });
   if (!response.ok) throw createHttpError('تعذر تحميل المحادثة الخاصة', 500, 'direct_messages_read_failed');
   const rows = await response.json();
-  return rows.filter(row => row.document).map(row => convertFromFirestoreFields(row.document.fields || {}))
-    .sort((a, b) => String(a.createdAt || '').localeCompare(String(b.createdAt || '')));
+  return rows.filter(row => row.document).map(row => {
+    const message = convertFromFirestoreFields(row.document.fields || {});
+    message.id = message.id || firestoreDocumentId(row.document.name);
+    return message;
+  }).reverse();
 }
 
 async function handleDirectMessages(request, otherUid, callerUid, callerRole, projectId, accessToken, corsHeaders) {
@@ -2234,9 +2238,10 @@ async function getFirestoreDoc(projectId, accessToken, path, transactionId) {
   return await resp.json();
 }
 
-async function listFirestoreDocs(projectId, accessToken, collection, pageSize) {
+async function listFirestoreDocs(projectId, accessToken, collection, pageSize, pageToken) {
   const url = new URL(`${FIRESTORE_BASE_URL}/${projectId}/databases/(default)/documents/${collection}`);
   url.searchParams.set('pageSize', String(pageSize));
+  if (pageToken) url.searchParams.set('pageToken', pageToken);
   const resp = await fetch(url, {
     headers: { Authorization: `Bearer ${accessToken}` },
   });
@@ -2248,6 +2253,17 @@ async function listFirestoreDocs(projectId, accessToken, collection, pageSize) {
     documents: Array.isArray(data.documents) ? data.documents : [],
     nextPageToken: data.nextPageToken || null,
   };
+}
+
+async function listAllFirestoreDocs(projectId, accessToken, collection, pageSize = 100, maxDocuments = 500) {
+  const documents = [];
+  let pageToken = null;
+  do {
+    const page = await listFirestoreDocs(projectId, accessToken, collection, pageSize, pageToken);
+    documents.push(...page.documents);
+    pageToken = page.nextPageToken;
+  } while (pageToken && documents.length < maxDocuments);
+  return { documents: documents.slice(0, maxDocuments), nextPageToken: pageToken };
 }
 
 // Convert native JS object to Firestore REST API fields
