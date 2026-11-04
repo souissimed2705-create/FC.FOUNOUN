@@ -201,7 +201,12 @@ export default {
         return await handleWorkerTaskProgress(request, taskId, callerUid, projectId, saAccessToken, corsHeaders);
       }
       if (decodedToken.role === 'worker') {
-        throw createHttpError('حساب العامل لا يملك صلاحيات الإدارة', 403, 'worker_admin_forbidden');
+        if (request.method === 'GET' && cleanPath.startsWith('/api/models')) {
+          const workerDoc = await getFirestoreDoc(projectId, saAccessToken, `workers/${callerUid}`);
+          if (!workerDoc || convertFromFirestoreFields(workerDoc.fields || {}).status !== 'active') throw createHttpError('حساب مشرف العمال غير نشط', 403, 'worker_inactive');
+          return await handleListModels(request, projectId, saAccessToken, corsHeaders);
+        }
+        throw createHttpError('حساب مشرف العمال لا يملك صلاحيات الإدارة', 403, 'worker_admin_forbidden');
       }
       // 4. Verify Super Admin RBAC via Firestore
       const callerRole = await verifyManagementRole(callerUid, projectId, saAccessToken);
