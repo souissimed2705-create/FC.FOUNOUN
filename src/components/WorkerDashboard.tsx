@@ -22,7 +22,7 @@ export const WorkerDashboard: React.FC<Props> = ({ worker }) => {
     try { const response = await listMyConversation(); setMessages(response.data || []); }
     catch (err) { setError(err instanceof Error ? err.message : 'تعذر تحميل المحادثة.'); }
   }, []);
-  useEffect(() => { void refresh(); void refreshMessages(); }, [refresh, refreshMessages]);
+  useEffect(() => { void refresh(); void refreshMessages(); const timer = window.setInterval(() => void refreshMessages(), 7000); return () => window.clearInterval(timer); }, [refresh, refreshMessages]);
   const submitProgress = async (task: TaskRecord) => {
     const quantity = Number(quantities[task.id]);
     if (!Number.isSafeInteger(quantity) || quantity < 1) { setError('أدخل كمية صحيحة أكبر من صفر.'); return; }
