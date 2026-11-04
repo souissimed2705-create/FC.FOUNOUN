@@ -130,7 +130,7 @@ export async function verifyAdmin(uid: string): Promise<UserProfile> {
   const docSnap = await getDoc(userDocRef);
   if (!docSnap.exists()) throw new Error('NO_DOCUMENT');
   const data = docSnap.data();
-  if (!data || !['admin', 'super_admin'].includes(data.role)) {
+  if (!data || !['admin', 'super_admin', 'responsible'].includes(data.role)) {
     throw new Error('UNAUTHORIZED_ROLE');
   }
   if (data.status !== 'active') throw new Error('INACTIVE_ACCOUNT');
@@ -139,7 +139,7 @@ export async function verifyAdmin(uid: string): Promise<UserProfile> {
     email: data.email || '',
     role: data.role,
     status: data.status,
-    displayName: data.displayName || (data.role === 'super_admin' ? 'المشرف' : 'المسؤول'),
+    displayName: data.displayName || (data.role === 'super_admin' ? 'المشرف العام' : data.role === 'responsible' ? 'المسؤول' : 'المدير العام'),
     createdAt: data.createdAt,
   };
 }
