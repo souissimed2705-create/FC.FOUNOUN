@@ -79,18 +79,20 @@ export default {
     const workerTaskStatusMatch = cleanPath.match(/^\/api\/worker\/tasks\/([^/]+)\/status$/);
     const workerTaskStatusRoute = workerTaskStatusMatch && request.method === 'PUT';
     const workerMessagesRoute = cleanPath === '/api/worker/messages' && ['GET', 'POST'].includes(request.method);
+    const workerCyclesRoute = cleanPath === '/api/worker/cycles' && ['GET', 'POST'].includes(request.method);
+    const managementCyclesRoute = cleanPath === '/api/cycles' && request.method === 'GET';
     const adminMessagesRoute = cleanPath === '/api/messages' && ['GET', 'POST'].includes(request.method);
     if (managementRoute?.error) {
       return jsonResponse({ success: false, error: managementRoute.error.message, code: managementRoute.error.code }, 400, corsHeaders);
     }
-    if (!managementRoute && !workerLoginRoute && !workerTasksRoute && !workerProgressRoute && !workerTaskStatusRoute && !workerMessagesRoute && !adminMessagesRoute && !cleanPath.startsWith('/api/models')) {
+    if (!managementRoute && !workerLoginRoute && !workerTasksRoute && !workerProgressRoute && !workerTaskStatusRoute && !workerMessagesRoute && !workerCyclesRoute && !managementCyclesRoute && !adminMessagesRoute && !cleanPath.startsWith('/api/models')) {
       return jsonResponse({ success: false, error: 'المسار المطلوب غير موجود', code: 'not_found' }, 404, corsHeaders);
     }
 
     let modelIdParam = null;
     const modelsPrefix = '/api/models';
 
-    if (managementRoute || workerLoginRoute || workerTasksRoute || workerProgressRoute || workerTaskStatusRoute || workerMessagesRoute || adminMessagesRoute) {
+    if (managementRoute || workerLoginRoute || workerTasksRoute || workerProgressRoute || workerTaskStatusRoute || workerMessagesRoute || workerCyclesRoute || managementCyclesRoute || adminMessagesRoute) {
       // Validated API routes are dispatched after authentication.
     } else if (cleanPath === modelsPrefix) {
       if (request.method !== 'GET' && request.method !== 'POST') {
@@ -165,12 +167,13 @@ export default {
       const callerUid = decodedToken.sub;
 
       const saAccessToken = await getServiceAccountAccessToken(serviceAccount);
-      if (workerTasksRoute || workerProgressRoute || workerTaskStatusRoute || workerMessagesRoute) {
+      if (workerTasksRoute || workerProgressRoute || workerTaskStatusRoute || workerMessagesRoute || workerCyclesRoute) {
         if (decodedToken.role !== 'worker' || decodedToken.workerId !== callerUid) {
           throw createHttpError('هذه الخدمة مخصصة لحساب العامل فقط', 403, 'worker_only');
         }
         if (workerTasksRoute) return await handleWorkerListTasks(callerUid, projectId, saAccessToken, corsHeaders);
         if (workerMessagesRoute) return await handleWorkerMessages(request, callerUid, projectId, saAccessToken, corsHeaders);
+        if (workerCyclesRoute) return await handleWorkerCycles(request, callerUid, projectId, saAccessToken, corsHeaders);
         if (workerTaskStatusRoute) return await handleWorkerTaskStatus(request, safeDecodeUriSegment(workerTaskStatusMatch[1]), callerUid, projectId, saAccessToken, corsHeaders);
         const taskId = safeDecodeUriSegment(workerProgressMatch[1]);
         return await handleWorkerTaskProgress(request, taskId, callerUid, projectId, saAccessToken, corsHeaders);
@@ -184,6 +187,7 @@ export default {
         assertWorkerManagementPermission(callerRole, request.method, managementRoute.action);
       }
       if (adminMessagesRoute) return await handleManagementMessages(request, callerUid, callerRole, projectId, saAccessToken, corsHeaders);
+      if (managementCyclesRoute) return await handleListCycles(request, projectId, saAccessToken, corsHeaders);
 
       // 5. Dispatch Route Handlers
       if (managementRoute) {
@@ -271,7 +275,7 @@ async function dispatchManagementRoute(request, route, callerUid, callerRole, pr
 }
 
 const RESOURCE_FIELDS = {
-  workers: ['name', 'phone', 'email', 'status', 'notes'],
+  workers: ['name', 'phone', 'email', 'status', 'notes', 'machineNumber', 'shift'],
   tasks: ['title', 'description', 'status', 'priority', 'assignedWorkerId', 'assignedWorkerName', 'modelId', 'modelName', 'modelCategory', 'targetQuantity', 'completedQuantity', 'dueDate'],
 };
 
@@ -314,12 +318,21 @@ function validateResourcePayload(payload, resource, isCreate) {
     if (payload.phone !== undefined && typeof payload.phone !== 'string') {
       throw createHttpError('رقم هاتف العامل غير صالح', 400, 'invalid_worker_phone');
     }
+    if (payload.machineNumber !== undefined && ![1, 2, 3].includes(payload.machineNumber)) {
+      throw createHttpError('رقم المكينة يجب أن يكون 1 أو 2 أو 3', 400, 'invalid_machine_number');
+    }
+    if (payload.shift !== undefined && !['day', 'night'].includes(payload.shift)) {
+      throw createHttpError('الوردية يجب أن تكون نهارية أو ليلية', 400, 'invalid_shift');
+    }
+    if ((payload.machineNumber === undefined) !== (payload.shift === undefined)) {
+      throw createHttpError('يجب تحديد المكينة والوردية معاً', 400, 'incomplete_machine_assignment');
+    }
   }
 }
 
-async function parseJsonBody(request) {
+async function parseJsonBody(request, maxBytes = 64 * 1024) {
   let payload;
-  try { payload = JSON.parse(await readStreamWithLimit(request.body, 64 * 1024)); }
+  try { payload = JSON.parse(await readStreamWithLimit(request.body, maxBytes)); }
   catch (err) {
     if (err?.code === 'payload_too_large') throw err;
     throw createHttpError('محتوى الطلب ليس بتنسيق JSON صالح', 400, 'invalid_json');
@@ -597,6 +610,65 @@ async function handleWorkerMessages(request, workerId, projectId, accessToken, c
   const worker = convertFromFirestoreFields(workerDoc.fields || {});
   const message = await saveConversationMessage(workerId, workerId, 'worker', worker.name || 'العامل', payload.text, projectId, accessToken);
   return jsonResponse({ success: true, data: message }, 201, corsHeaders);
+}
+
+
+async function handleWorkerCycles(request, workerId, projectId, accessToken, corsHeaders) {
+  const workerDoc = await getFirestoreDoc(projectId, accessToken, `workers/${workerId}`);
+  if (!workerDoc) throw createHttpError('حساب مشرف العمال غير موجود', 403, 'worker_inactive');
+  const worker = convertFromFirestoreFields(workerDoc.fields || {});
+  if (worker.status !== 'active') throw createHttpError('حساب مشرف العمال غير نشط', 403, 'worker_inactive');
+  if (![1, 2, 3].includes(worker.machineNumber) || !['day', 'night'].includes(worker.shift)) {
+    throw createHttpError('لم يحدد المشرف العام المكينة والوردية لهذا الحساب بعد', 409, 'machine_assignment_missing');
+  }
+  if (request.method === 'GET') {
+    const rows = await listFirestoreDocs(projectId, accessToken, 'machine_cycles', 100);
+    const reports = rows.documents.map(doc => convertFromFirestoreFields(doc.fields || {}))
+      .filter(item => item.workerId === workerId)
+      .sort((a, b) => String(b.recordedAt || '').localeCompare(String(a.recordedAt || '')));
+    return jsonResponse({ success: true, data: reports }, 200, corsHeaders);
+  }
+  const payload = await parseJsonBody(request, 700 * 1024);
+  if (!Number.isSafeInteger(payload?.count) || payload.count < 0 || payload.count > 100000000) {
+    throw createHttpError('عدد الدورات يجب أن يكون عدداً صحيحاً غير سالب', 400, 'invalid_cycle_count');
+  }
+  const photo = typeof payload.photo === 'string' ? payload.photo : '';
+  if (!photo || photo.length > 480000 || !/^data:image\/(?:jpeg|webp);base64,[A-Za-z0-9+/]+={0,2}$/.test(photo)) {
+    throw createHttpError('صورة العداد غير صالحة أو حجمها كبير؛ أعد اختيار صورة مضغوطة', 400, 'invalid_counter_photo');
+  }
+  const now = new Date();
+  const date = new Intl.DateTimeFormat('en-CA', { timeZone: 'Africa/Tunis', year: 'numeric', month: '2-digit', day: '2-digit' }).format(now);
+  const shift = worker.shift;
+  const machineNumber = worker.machineNumber;
+  const id = `mc_${date.replace(/-/g, '')}_${machineNumber}_${shift}`;
+  const path = `machine_cycles/${id}`;
+  const existing = await getFirestoreDoc(projectId, accessToken, path);
+  if (existing) {
+    const previous = convertFromFirestoreFields(existing.fields || {});
+    if (previous.workerId !== workerId) throw createHttpError('تم تسجيل تقرير هذه المكينة والوردية لهذا اليوم بواسطة حساب آخر', 409, 'cycle_report_exists');
+  }
+  const record = {
+    id, machineNumber, shift, date, count: payload.count, photo,
+    workerId, workerName: String(worker.name || 'مشرف العمال').slice(0, 100),
+    recordedAt: now.toISOString(), updatedAt: now.toISOString()
+  };
+  const write = {
+    update: { name: `projects/${projectId}/databases/(default)/documents/${path}`, fields: convertToFirestoreFields(record) },
+    currentDocument: existing?.updateTime ? { updateTime: existing.updateTime } : { exists: false }
+  };
+  await commitFirestoreTransaction(projectId, accessToken, null, [write]);
+  return jsonResponse({ success: true, data: { ...record, photo: undefined } }, existing ? 200 : 201, corsHeaders);
+}
+
+async function handleListCycles(request, projectId, accessToken, corsHeaders) {
+  const url = new URL(request.url);
+  const requested = Number(url.searchParams.get('pageSize') || '100');
+  const pageSize = Number.isInteger(requested) ? Math.min(Math.max(requested, 1), 200) : 100;
+  const result = await listFirestoreDocs(projectId, accessToken, 'machine_cycles', pageSize);
+  const data = result.documents.map(doc => convertFromFirestoreFields(doc.fields || {}))
+    .sort((a, b) => String(b.recordedAt || '').localeCompare(String(a.recordedAt || '')))
+    .map(({ photo, ...report }) => ({ ...report, hasPhoto: Boolean(photo) }));
+  return jsonResponse({ success: true, data, nextPageToken: result.nextPageToken }, 200, corsHeaders);
 }
 
 async function handleWorkerListTasks(workerId, projectId, accessToken, corsHeaders) {
@@ -1723,7 +1795,7 @@ async function verifyManagementRole(uid, projectId, accessToken) {
 
   const doc = await resp.json();
   const fields = convertFromFirestoreFields(doc.fields || {});
-  if (!['admin', 'super_admin'].includes(fields.role) || fields.status !== 'active') {
+  if (!['admin', 'super_admin', 'responsible'].includes(fields.role) || fields.status !== 'active') {
     throw createHttpError('يلزم حساب مسؤول أو مشرف نشط لتنفيذ هذه العملية', 403, 'forbidden');
   }
   return fields.role;
