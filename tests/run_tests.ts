@@ -57,13 +57,13 @@ export async function runAllTests() {
     }
   }
 
-  function assertThrowsWithCode(fn: () => unknown, expectedCode: string, testName: string) {
+  function assertThrowsWithCode(fn: () => unknown, expectedCode: string, testName: string, expectedStatus = 403) {
     try {
       fn();
       assert(false, testName, 'لم يتم رفض العملية');
     } catch (error) {
       const err = error as { status?: number; code?: string };
-      assert(err.status === 403 && err.code === expectedCode, testName, 'رمز الرفض أو الحالة غير صحيح');
+      assert(err.status === expectedStatus && err.code === expectedCode, testName, 'رمز الرفض أو الحالة غير صحيح');
     }
   }
 
@@ -360,7 +360,8 @@ export async function runAllTests() {
       'mgr_old', 'mgr_super'
     ),
     'responsible_shift_taken',
-    'منع تفعيل مسؤولين اثنين في الوردية نفسها'
+    'منع تفعيل مسؤولين اثنين في الوردية نفسها',
+    409
   );
 
   // 9. Worker account freeze is reversible; the record is retained, never hard-deleted.
