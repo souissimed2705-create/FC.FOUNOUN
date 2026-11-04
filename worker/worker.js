@@ -288,6 +288,9 @@ function validateResourcePayload(payload, resource, isCreate) {
       if (typeof payload.assignedWorkerId !== 'string' || !payload.assignedWorkerId.trim()) {
         throw createHttpError('العامل المسؤول عن المهمة إلزامي', 400, 'missing_worker');
       }
+      if (typeof payload.modelId !== 'string' || !RESOURCE_ID_REGEX.test(payload.modelId)) {
+        throw createHttpError('اختيار مودال موجود إلزامي قبل إصدار أمر الإنتاج', 400, 'missing_model');
+      }
       if (!Number.isSafeInteger(payload.targetQuantity) || payload.targetQuantity < 1) {
         throw createHttpError('الكمية المطلوبة يجب أن تكون عدداً صحيحاً موجباً', 400, 'invalid_target_quantity');
       }
@@ -331,9 +334,12 @@ async function handleCreateResource(request, resource, callerUid, projectId, acc
     if (!assignedWorkerDoc) throw createHttpError('العامل المحدد غير موجود', 404, 'worker_not_found');
     const assignedWorker = convertFromFirestoreFields(assignedWorkerDoc.fields || {});
     if (assignedWorker.status !== 'active') throw createHttpError('لا يمكن إسناد مهمة إلى عامل غير نشط', 409, 'worker_inactive');
-    taskDetails = { assignedWorkerName: assignedWorker.name };
+    const modelDoc = await getFirestoreDoc(projectId, accessToken, `models/${payload.modelId}`);
+    if (!modelDoc) throw createHttpError('المودال المحدد غير موجود في الكتالوج', 404, 'model_not_found');
+    const model = convertFromFirestoreFields(modelDoc.fields || {});
+    taskDetails = { assignedWorkerName: assignedWorker.name, modelId: payload.modelId, modelName: model.name, modelCategory: model.category };
   }
-  const record = { id, ...defaults, ...taskDetails, ...payload, createdBy: callerUid, createdAt: now, updatedAt: now };
+  const record = { id, ...defaults, ...payload, ...taskDetails, createdBy: callerUid, createdAt: now, updatedAt: now };
   const writes = [{ update: { name: `projects/${projectId}/databases/(default)/documents/${resource}/${id}`, fields: convertToFirestoreFields(record) }, currentDocument: { exists: false } }];
   await commitFirestoreTransaction(projectId, accessToken, null, writes);
   return jsonResponse({ success: true, [resource === 'workers' ? 'worker' : 'task']: record }, 201, corsHeaders);
