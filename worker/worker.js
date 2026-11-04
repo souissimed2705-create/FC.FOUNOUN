@@ -1076,12 +1076,16 @@ async function handleWorkerCycles(request, workerId, projectId, accessToken, cor
     throw createHttpError('لم يحدد المشرف العام المكينة والوردية لهذا الحساب بعد', 409, 'machine_assignment_missing');
   }
   if (request.method === 'GET') {
-    const rows = await listAllFirestoreDocs(projectId, accessToken, 'machine_cycles', 100, 1000);
+    const url = new URL(request.url);
+    const requested = Number(url.searchParams.get('pageSize') || '100');
+    const pageSize = Number.isInteger(requested) ? Math.min(Math.max(requested, 1), 200) : 100;
+    const pageToken = url.searchParams.get('pageToken') || null;
+    const rows = await listFirestoreDocs(projectId, accessToken, 'machine_cycles', pageSize, pageToken, '__name__ desc');
     const reports = rows.documents.map(doc => convertFromFirestoreFields(doc.fields || {}))
       .filter(item => item.workerId === workerId)
       .sort((a, b) => String(b.recordedAt || '').localeCompare(String(a.recordedAt || '')))
       .map(({ photo, ...report }) => ({ ...report, hasPhoto: Boolean(photo) }));
-    return jsonResponse({ success: true, data: reports }, 200, corsHeaders);
+    return jsonResponse({ success: true, data: reports, nextPageToken: rows.nextPageToken }, 200, corsHeaders);
   }
   const payload = await parseJsonBody(request, 700 * 1024);
   if (!Number.isSafeInteger(payload?.count) || payload.count < 0 || payload.count > 100000000) {
