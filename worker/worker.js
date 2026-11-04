@@ -392,8 +392,8 @@ async function handleListResource(request, resource, projectId, accessToken, cor
   const pageSize = Number.isInteger(requested) ? Math.min(Math.max(requested, 1), 100) : 50;
   const result = await listAllFirestoreDocs(projectId, accessToken, resource, 100, 500);
   const records = result.documents.map((doc) => sanitizeResourceOutput(convertFromFirestoreFields(doc.fields || {}), resource));
-  const visibleRecords = resource === 'workers' && callerRole === 'responsible'
-    ? records.map(worker => ({ id: worker.id, name: worker.name, status: worker.status, machineNumber: worker.machineNumber, shift: worker.shift }))
+  const visibleRecords = resource === 'workers'
+    ? records.map(worker => sanitizeWorkerOutputForRole(worker, callerRole))
     : records;
   return jsonResponse({ success: true, [resource]: visibleRecords, nextPageToken: result.nextPageToken }, 200, corsHeaders);
 }
@@ -437,7 +437,8 @@ async function handleCreateResource(request, resource, callerUid, projectId, acc
     writes.push(buildWorkerMachineReservationWrite(projectId, id, record.machineNumber, record.shift, slotDoc, true));
   }
   await commitFirestoreTransaction(projectId, accessToken, null, writes);
-  return jsonResponse({ success: true, [resource === 'workers' ? 'worker' : 'task']: record }, 201, corsHeaders);
+  const responseRecord = resource === 'workers' ? sanitizeWorkerOutputForRole(record, callerRole) : record;
+  return jsonResponse({ success: true, [resource === 'workers' ? 'worker' : 'task']: responseRecord }, 201, corsHeaders);
 }
 
 async function handleUpdateResource(request, resource, id, callerUid, projectId, accessToken, corsHeaders, callerRole = null) {
@@ -532,7 +533,8 @@ async function handleUpdateResource(request, resource, id, callerUid, projectId,
     }
   }
   await commitFirestoreTransaction(projectId, accessToken, null, writes);
-  return jsonResponse({ success: true, [resource === 'workers' ? 'worker' : 'task']: sanitizeResourceOutput(record, resource) }, 200, corsHeaders);
+  const responseRecord = resource === 'workers' ? sanitizeWorkerOutputForRole(record, callerRole) : sanitizeResourceOutput(record, resource);
+  return jsonResponse({ success: true, [resource === 'workers' ? 'worker' : 'task']: responseRecord }, 200, corsHeaders);
 }
 
 async function handleUpdateTaskCollection(request, callerUid, projectId, accessToken, corsHeaders) {
@@ -1415,6 +1417,20 @@ async function handleTaskProgress(request, taskId, callerUid, projectId, accessT
     return jsonResponse({ success: true, task: sanitizeResourceOutput(latestRecord, 'tasks'), duplicate: true }, 200, corsHeaders);
   }
   return jsonResponse({ success: true, task: sanitizeResourceOutput(record, 'tasks'), duplicate: false }, 200, corsHeaders);
+}
+
+export function sanitizeWorkerOutputForRole(record, callerRole) {
+  const clean = sanitizeResourceOutput(record, 'workers');
+  if (callerRole === 'responsible') {
+    return {
+      id: clean.id,
+      name: clean.name,
+      status: clean.status,
+      machineNumber: clean.machineNumber,
+      shift: clean.shift
+    };
+  }
+  return clean;
 }
 
 function sanitizeResourceOutput(record, resource) {
