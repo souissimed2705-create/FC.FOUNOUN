@@ -28,6 +28,7 @@ import {
   safeDecodeUriSegment,
   buildWorkerFreezeUpdate,
   assertWorkerManagementPermission,
+  assertSuperAdminManagementAccountsPermission,
   isExactParticipantPair,
   firestoreDocumentId,
   isOriginAllowed,
@@ -52,6 +53,16 @@ export async function runAllTests() {
     } else {
       console.error(`  ✗ [فشل] ${testName} - ${detail || 'شرط غير متحقق'}`);
       failed++;
+    }
+  }
+
+  function assertThrowsWithCode(fn: () => unknown, expectedCode: string, testName: string) {
+    try {
+      fn();
+      assert(false, testName, 'لم يتم رفض العملية');
+    } catch (error) {
+      const err = error as { status?: number; code?: string };
+      assert(err.status === 403 && err.code === expectedCode, testName, 'رمز الرفض أو الحالة غير صحيح');
     }
   }
 
@@ -322,6 +333,13 @@ export async function runAllTests() {
     malformedStatus = err.status;
   }
   assert(malformedCaught && malformedStatus === 400, 'إرجاع رمز الحالة 400 (Bad Request) بدلاً من 500 عند وجود معرّف مشوّه في المسار');
+
+  // Management account administration is exclusive to the super admin.
+  console.log('\\n9. اختبارات حصرية إدارة حسابات المديرين والمسؤولين:');
+  assert(assertSuperAdminManagementAccountsPermission('super_admin') === true, 'السماح للمشرف العام بإدارة حسابات الإدارة');
+  for (const role of ['admin', 'responsible']) {
+    assertThrowsWithCode(() => assertSuperAdminManagementAccountsPermission(role), 'super_admin_only_management_accounts', `رفض ${role} من إدارة حسابات المديرين والمسؤولين`);
+  }
 
   // 9. Worker account freeze is reversible; the record is retained, never hard-deleted.
   console.log('\n9. اختبارات تجميد حساب العامل دون حذفه:');
