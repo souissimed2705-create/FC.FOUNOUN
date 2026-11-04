@@ -6,6 +6,7 @@ import { listMyTasks, recordMyProgress, updateMyTaskStatus, listMyMachineCycles,
 import { PrivateMessagesPanel } from './PrivateMessagesPanel';
 import { ModelsPanel } from './ModelsPanel';
 import { optimizeAndEncodeImage } from '../utils/imageOptimizer';
+import { readOfflineSnapshot, saveOfflineSnapshot } from '../utils/offlineCache';
 import type { TaskRecord, MachineCycleRecord } from '../types/operations';
 
 interface Props { worker: { id: string; name: string }; }
@@ -24,13 +25,29 @@ export const WorkerDashboard: React.FC<Props> = ({ worker }) => {
   const [notice, setNotice] = useState('');
   const [pendingSync, setPendingSync] = useState(queuedMutationCount());
   const refresh = useCallback(async () => {
-    try { const response = await listMyTasks(); setTasks(response.data || []); }
-    catch (err) { setError(err instanceof Error ? err.message : 'تعذر تحميل المهام.'); }
-  }, []);
+    try {
+      const response = await listMyTasks();
+      const data = response.data || [];
+      setTasks(data);
+      void saveOfflineSnapshot(`worker-tasks:${worker.id}`, data).catch(() => undefined);
+    } catch (err) {
+      const cached = await readOfflineSnapshot<TaskRecord[]>(`worker-tasks:${worker.id}`).catch(() => null);
+      if (cached) { setTasks(cached); setNotice('أنت دون اتصال؛ تعرض آخر نسخة محفوظة من مهامك.'); }
+      else setError(err instanceof Error ? err.message : 'تعذر تحميل المهام ولا توجد نسخة محفوظة.');
+    }
+  }, [worker.id]);
   const refreshCycles = useCallback(async () => {
-    try { const response = await listMyMachineCycles(); setCycles(response.data || []); }
-    catch (err) { setError(err instanceof Error ? err.message : 'تعذر تحميل تقارير الدورات.'); }
-  }, []);
+    try {
+      const response = await listMyMachineCycles();
+      const data = response.data || [];
+      setCycles(data);
+      void saveOfflineSnapshot(`worker-cycles:${worker.id}`, data).catch(() => undefined);
+    } catch (err) {
+      const cached = await readOfflineSnapshot<MachineCycleRecord[]>(`worker-cycles:${worker.id}`).catch(() => null);
+      if (cached) { setCycles(cached); setNotice('أنت دون اتصال؛ تعرض آخر نسخة محفوظة من تقارير الدورات.'); }
+      else setError(err instanceof Error ? err.message : 'تعذر تحميل تقارير الدورات ولا توجد نسخة محفوظة.');
+    }
+  }, [worker.id]);
   useEffect(() => { void refresh(); void refreshCycles(); }, [refresh, refreshCycles]);
   useEffect(() => {
     const onOnline = async () => {
