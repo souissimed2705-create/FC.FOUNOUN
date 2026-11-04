@@ -399,8 +399,8 @@ async function handleListResource(request, resource, projectId, accessToken, cor
 }
 
 async function handleCreateResource(request, resource, callerUid, projectId, accessToken, corsHeaders, callerRole = 'super_admin') {
-  if (resource === 'tasks') assertTaskCreationFieldsAllowed(await parseJsonBody(request.clone()));
   const payload = await parseJsonBody(request);
+  if (resource === 'tasks') assertTaskCreationFieldsAllowed(payload);
   validateResourcePayload(payload, resource, true);
   if (resource === 'workers') assertResponsibleWorkerFieldsAllowed(callerRole, payload);
   if (resource === 'workers') {
