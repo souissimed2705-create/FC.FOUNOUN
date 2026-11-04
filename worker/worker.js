@@ -503,7 +503,6 @@ async function handleUpdateResource(request, resource, id, callerUid, projectId,
   const write = { update: { name: `projects/${projectId}/databases/(default)/documents/${resource}/${id}`, fields: convertToFirestoreFields(record) }, currentDocument: { updateTime: currentDoc.updateTime } };
   const writes = [write];
   if (resource === 'workers') {
-    const wasActive = current.status === 'active';
     const willBeActive = record.status === 'active';
     const oldAssignmentValid = [1, 2, 3].includes(current.machineNumber) && ['day', 'night'].includes(current.shift);
     const newAssignmentValid = [1, 2, 3].includes(record.machineNumber) && ['day', 'night'].includes(record.shift);
