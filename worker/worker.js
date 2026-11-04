@@ -430,11 +430,32 @@ async function createFirebaseCustomToken(env, uid, workerName) {
 }
 
 async function readConversation(workerId, projectId, accessToken) {
-  const result = await listFirestoreDocs(projectId, accessToken, 'messages', 100);
-  return result.documents
-    .map(doc => convertFromFirestoreFields(doc.fields || {}))
-    .filter(message => message.workerId === workerId)
-    .sort((a, b) => String(a.createdAt || '').localeCompare(String(b.createdAt || '')));
+  const url = `${FIRESTORE_BASE_URL}/${projectId}/databases/(default)/documents:runQuery`;
+  const response = await fetch(url, {
+    method: 'POST',
+    headers: { Authorization: `Bearer ${accessToken}`, 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      structuredQuery: {
+        from: [{ collectionId: 'messages' }],
+        where: {
+          fieldFilter: {
+            field: { fieldPath: 'workerId' },
+            op: 'EQUAL',
+            value: { stringValue: workerId }
+          }
+        },
+        orderBy: [{ field: { fieldPath: 'createdAt' }, direction: 'DESCENDING' }],
+        limit: 100
+      }
+    })
+  });
+  if (!response.ok) throw createHttpError('تعذر تحميل رسائل المحادثة', 500, 'messages_read_failed');
+  const rows = await response.json();
+  return rows.filter(row => row.document).map(row => {
+    const message = convertFromFirestoreFields(row.document.fields || {});
+    message.id = message.id || String(row.document.name || '').split('/').pop();
+    return message;
+  }).sort((a, b) => String(a.createdAt || '').localeCompare(String(b.createdAt || '')));
 }
 
 async function saveConversationMessage(workerId, senderUid, senderRole, senderName, text, projectId, accessToken) {
