@@ -2366,11 +2366,15 @@ async function listAllFirestoreDocs(projectId, accessToken, collection, pageSize
   const documents = [];
   let pageToken = null;
   do {
-    const page = await listFirestoreDocs(projectId, accessToken, collection, pageSize, pageToken);
+    const remaining = maxDocuments - documents.length;
+    if (remaining <= 0) {
+      throw createHttpError('تجاوز عدد السجلات الحد الآمن للقراءة؛ لم تُستخدم قائمة ناقصة لاتخاذ القرار', 503, 'collection_read_limit_exceeded');
+    }
+    const page = await listFirestoreDocs(projectId, accessToken, collection, Math.min(pageSize, remaining), pageToken);
     documents.push(...page.documents);
     pageToken = page.nextPageToken;
-  } while (pageToken && documents.length < maxDocuments);
-  return { documents: documents.slice(0, maxDocuments), nextPageToken: pageToken };
+  } while (pageToken);
+  return { documents, nextPageToken: null };
 }
 
 // Convert native JS object to Firestore REST API fields
