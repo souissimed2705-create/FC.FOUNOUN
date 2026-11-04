@@ -184,7 +184,7 @@ export default {
 
       // 5. Dispatch Route Handlers
       if (managementRoute) {
-        return await dispatchManagementRoute(request, managementRoute, callerUid, projectId, saAccessToken, corsHeaders);
+        return await dispatchManagementRoute(request, managementRoute, callerUid, callerRole, projectId, saAccessToken, corsHeaders);
       }
 
       if (request.method === 'GET') {
@@ -248,12 +248,12 @@ function parseManagementRoute(path, method) {
   return { resource, id, action: suffix };
 }
 
-async function dispatchManagementRoute(request, route, callerUid, projectId, accessToken, corsHeaders) {
+async function dispatchManagementRoute(request, route, callerUid, callerRole, projectId, accessToken, corsHeaders) {
   if (route.resource === 'workers' && route.action === 'pin') {
     return handleSetWorkerPin(request, route.id, callerUid, projectId, accessToken, corsHeaders);
   }
   if (route.resource === 'workers') {
-    if (request.method === 'GET') return handleListResource(request, 'workers', projectId, accessToken, corsHeaders);
+    if (request.method === 'GET') return handleListResource(request, 'workers', projectId, accessToken, corsHeaders, callerRole);
     if (request.method === 'POST') return handleCreateResource(request, 'workers', callerUid, projectId, accessToken, corsHeaders);
     if (request.method === 'PUT') return handleUpdateResource(request, 'workers', route.id, callerUid, projectId, accessToken, corsHeaders);
     return handleDeleteResource(route.id, 'workers', projectId, accessToken, corsHeaders);
@@ -313,13 +313,16 @@ async function parseJsonBody(request) {
   return payload;
 }
 
-async function handleListResource(request, resource, projectId, accessToken, corsHeaders) {
+async function handleListResource(request, resource, projectId, accessToken, corsHeaders, callerRole = 'super_admin') {
   const url = new URL(request.url);
   const requested = Number(url.searchParams.get('pageSize') || '50');
   const pageSize = Number.isInteger(requested) ? Math.min(Math.max(requested, 1), 100) : 50;
   const result = await listFirestoreDocs(projectId, accessToken, resource, pageSize);
   const records = result.documents.map((doc) => sanitizeResourceOutput(convertFromFirestoreFields(doc.fields || {}), resource));
-  return jsonResponse({ success: true, [resource]: records, nextPageToken: result.nextPageToken }, 200, corsHeaders);
+  const visibleRecords = resource === 'workers' && callerRole === 'admin'
+    ? records.map(worker => ({ id: worker.id, name: worker.name, status: worker.status }))
+    : records;
+  return jsonResponse({ success: true, [resource]: visibleRecords, nextPageToken: result.nextPageToken }, 200, corsHeaders);
 }
 
 async function handleCreateResource(request, resource, callerUid, projectId, accessToken, corsHeaders) {
