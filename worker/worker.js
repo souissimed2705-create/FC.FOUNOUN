@@ -1144,9 +1144,16 @@ async function handleTaskProgress(request, taskId, callerUid, projectId, accessT
     if (previous.taskId !== taskId || previous.quantity !== payload.quantity) {
       throw createHttpError('معرّف العملية مستخدم لعملية إنجاز مختلفة', 409, 'mutation_id_conflict');
     }
+    if (previous.createdBy !== callerUid) {
+      throw createHttpError('لا يمكنك إعادة استخدام معرّف إنجاز تابع لمستخدم آخر', 403, 'mutation_owner_mismatch');
+    }
     const latestDoc = await getFirestoreDoc(projectId, accessToken, `tasks/${taskId}`);
     if (!latestDoc) throw createHttpError('المهمة المطلوبة غير موجودة', 404, 'task_not_found');
-    const latest = sanitizeResourceOutput(convertFromFirestoreFields(latestDoc.fields || {}), 'tasks');
+    const latestRecord = convertFromFirestoreFields(latestDoc.fields || {});
+    if (expectedWorkerId && latestRecord.assignedWorkerId !== expectedWorkerId) {
+      throw createHttpError('لا يمكنك الاطلاع على مهمة غير مسندة إليك', 403, 'task_not_assigned');
+    }
+    const latest = sanitizeResourceOutput(latestRecord, 'tasks');
     return jsonResponse({ success: true, task: latest, duplicate: true }, 200, corsHeaders);
   }
 
@@ -1197,9 +1204,12 @@ async function handleTaskProgress(request, taskId, callerUid, projectId, accessT
     if (!racedMutation) throw err;
     const raced = convertFromFirestoreFields(racedMutation.fields || {});
     if (raced.taskId !== taskId || raced.quantity !== payload.quantity) throw createHttpError('معرّف العملية مستخدم لعملية إنجاز مختلفة', 409, 'mutation_id_conflict');
+    if (raced.createdBy !== callerUid) throw createHttpError('لا يمكنك إعادة استخدام معرّف إنجاز تابع لمستخدم آخر', 403, 'mutation_owner_mismatch');
     const latestDoc = await getFirestoreDoc(projectId, accessToken, `tasks/${taskId}`);
     if (!latestDoc) throw createHttpError('المهمة المطلوبة غير موجودة', 404, 'task_not_found');
-    return jsonResponse({ success: true, task: sanitizeResourceOutput(convertFromFirestoreFields(latestDoc.fields || {}), 'tasks'), duplicate: true }, 200, corsHeaders);
+    const latestRecord = convertFromFirestoreFields(latestDoc.fields || {});
+    if (expectedWorkerId && latestRecord.assignedWorkerId !== expectedWorkerId) throw createHttpError('لا يمكنك الاطلاع على مهمة غير مسندة إليك', 403, 'task_not_assigned');
+    return jsonResponse({ success: true, task: sanitizeResourceOutput(latestRecord, 'tasks'), duplicate: true }, 200, corsHeaders);
   }
   return jsonResponse({ success: true, task: sanitizeResourceOutput(record, 'tasks'), duplicate: false }, 200, corsHeaders);
 }
