@@ -851,6 +851,10 @@ async function getActiveContact(uid, projectId, accessToken) {
   return null;
 }
 
+export function isExactParticipantPair(participants, uidA, uidB) {
+  return Array.isArray(participants) && participants.length === 2 && new Set(participants).size === 2 && participants.includes(uidA) && participants.includes(uidB);
+}
+
 async function buildDirectConversationId(uidA, uidB) {
   const pair = [uidA, uidB].sort();
   const digest = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(pair.join(':')));
@@ -905,7 +909,7 @@ async function handleDirectMessages(request, otherUid, callerUid, callerRole, pr
   if (request.method === 'GET') {
     if (!conversationDoc) return jsonResponse({ success: true, data: [] }, 200, corsHeaders);
     const conversation = convertFromFirestoreFields(conversationDoc.fields || {});
-    if (!Array.isArray(conversation.participants) || !conversation.participants.includes(callerUid) || !conversation.participants.includes(otherUid) || conversation.participants.length !== 2) {
+    if (!isExactParticipantPair(conversation.participants, callerUid, otherUid)) {
       throw createHttpError('لا تملك صلاحية الاطلاع على هذه المحادثة', 403, 'direct_conversation_forbidden');
     }
     const messages = await readDirectConversation(conversationId, projectId, accessToken);
