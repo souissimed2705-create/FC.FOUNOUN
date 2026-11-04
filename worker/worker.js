@@ -177,8 +177,8 @@ export default {
       }
       // 4. Verify Super Admin RBAC via Firestore
       const callerRole = await verifyManagementRole(callerUid, projectId, saAccessToken);
-      if (managementRoute?.resource === 'workers' && (request.method !== 'GET' || managementRoute.action === 'pin') && callerRole !== 'super_admin') {
-        throw createHttpError('إدارة حسابات العمال وإثباتاتهم ورموزهم من صلاحيات المشرف فقط', 403, 'super_admin_only_worker_management');
+      if (managementRoute?.resource === 'workers') {
+        assertWorkerManagementPermission(callerRole, request.method, managementRoute.action);
       }
       if (adminMessagesRoute) return await handleManagementMessages(request, callerUid, callerRole, projectId, saAccessToken, corsHeaders);
 
@@ -379,6 +379,14 @@ async function handleUpdateTaskCollection(request, callerUid, projectId, accessT
   const { id, ...changes } = payload;
   const syntheticRequest = new Request(request.url, { method: 'PUT', body: JSON.stringify(changes) });
   return handleUpdateResource(syntheticRequest, 'tasks', id, callerUid, projectId, accessToken, corsHeaders);
+}
+
+export function assertWorkerManagementPermission(role, method, action = null) {
+  const isReadOnlyDirectoryRequest = method === 'GET' && action !== 'pin';
+  if (role !== 'super_admin' && !isReadOnlyDirectoryRequest) {
+    throw createHttpError('إدارة حسابات العمال وإثباتاتهم ورموزهم من صلاحيات المشرف فقط', 403, 'super_admin_only_worker_management');
+  }
+  return true;
 }
 
 export function buildWorkerFreezeUpdate(current, timestamp) {
