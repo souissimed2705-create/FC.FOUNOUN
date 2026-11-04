@@ -50,14 +50,25 @@ export const WorkerDashboard: React.FC<Props> = ({ worker }) => {
   }, [worker.id]);
   useEffect(() => { void refresh(); void refreshCycles(); }, [refresh, refreshCycles]);
   useEffect(() => {
-    const onOnline = async () => {
+    let active = true;
+    const syncPendingOperations = async () => {
+      if (!navigator.onLine) return;
       const flushed = await flushQueuedMutations();
+      if (!active) return;
       setPendingSync(queuedMutationCount());
-      if (flushed > 0) setNotice(`تمت مزامنة ${flushed} عملية محفوظة دون اتصال.`);
-      await refresh(); await refreshCycles();
+      if (flushed > 0) {
+        setNotice(`تمت مزامنة ${flushed} عملية محفوظة دون اتصال.`);
+        await refresh();
+        await refreshCycles();
+      }
     };
-    window.addEventListener('online', onOnline);
-    return () => window.removeEventListener('online', onOnline);
+    // Retry after a reload too; do not wait for another online event.
+    void syncPendingOperations();
+    window.addEventListener('online', syncPendingOperations);
+    return () => {
+      active = false;
+      window.removeEventListener('online', syncPendingOperations);
+    };
   }, [refresh, refreshCycles]);
 
 
