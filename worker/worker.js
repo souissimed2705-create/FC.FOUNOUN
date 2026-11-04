@@ -408,7 +408,7 @@ async function handleCreateResource(request, resource, callerUid, projectId, acc
     if (workerPin !== undefined && callerRole !== 'super_admin') {
       throw createHttpError('تعيين PIN لمشرف العمال من اختصاص المشرف العام فقط', 403, 'worker_pin_super_admin_only');
     }
-    if (workerPin !== undefined && (typeof workerPin !== 'string' || !/^\\d{6}$/.test(workerPin))) {
+    if (workerPin !== undefined && (typeof workerPin !== 'string' || !/^\d{6}$/.test(workerPin))) {
       throw createHttpError('PIN يجب أن يتكون من 6 أرقام بالضبط', 400, 'invalid_pin');
     }
   }
