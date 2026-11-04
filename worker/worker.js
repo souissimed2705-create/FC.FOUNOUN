@@ -1333,7 +1333,8 @@ async function handleListModels(request, projectId, accessToken, corsHeaders) {
     : 50;
   const search = (url.searchParams.get('q') || '').trim().toLocaleLowerCase();
   const category = url.searchParams.get('category') || '';
-  const result = await listFirestoreDocs(projectId, accessToken, 'models', pageSize);
+  const pageToken = url.searchParams.get('pageToken') || null;
+  const result = await listFirestoreDocs(projectId, accessToken, 'models', pageSize, pageToken, '__name__');
   const models = result.documents
     .map((document) => convertFromFirestoreFields(document.fields || {}))
     .filter((model) => !category || model.category === category)
