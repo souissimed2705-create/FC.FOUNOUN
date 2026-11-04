@@ -29,6 +29,7 @@ import {
   buildWorkerFreezeUpdate,
   assertWorkerManagementPermission,
   assertSuperAdminManagementAccountsPermission,
+  assertManagementAccountUpdateAllowed,
   isExactParticipantPair,
   firestoreDocumentId,
   isOriginAllowed,
@@ -340,6 +341,27 @@ export async function runAllTests() {
   for (const role of ['admin', 'responsible']) {
     assertThrowsWithCode(() => assertSuperAdminManagementAccountsPermission(role), 'super_admin_only_management_accounts', `رفض ${role} من إدارة حسابات المديرين والمسؤولين`);
   }
+  assertThrowsWithCode(
+    () => assertManagementAccountUpdateAllowed({ role: 'admin', status: 'active' }, { status: 'inactive' }, [], 'mgr_self', 'mgr_self'),
+    'cannot_freeze_self',
+    'منع المشرف العام من تجميد حسابه بنفسه'
+  );
+  assert(assertManagementAccountUpdateAllowed(
+    { role: 'responsible', status: 'inactive', shift: 'day' },
+    { status: 'active' },
+    [{ uid: 'mgr_day', role: 'responsible', status: 'active', shift: 'day' }],
+    'mgr_old', 'mgr_super'
+  ) === true, 'السماح بإعادة تفعيل مسؤول إذا كانت ورديته غير مشغولة');
+  assertThrowsWithCode(
+    () => assertManagementAccountUpdateAllowed(
+      { role: 'responsible', status: 'inactive', shift: 'day' },
+      { status: 'active' },
+      [{ uid: 'mgr_day', role: 'responsible', status: 'active', shift: 'day' }],
+      'mgr_old', 'mgr_super'
+    ),
+    'responsible_shift_taken',
+    'منع تفعيل مسؤولين اثنين في الوردية نفسها'
+  );
 
   // 9. Worker account freeze is reversible; the record is retained, never hard-deleted.
   console.log('\n9. اختبارات تجميد حساب العامل دون حذفه:');
