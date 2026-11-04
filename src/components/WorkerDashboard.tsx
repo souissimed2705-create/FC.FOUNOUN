@@ -1,6 +1,6 @@
 import React, { useCallback, useEffect, useState } from 'react';
 import { signOut } from 'firebase/auth';
-import { ArrowRight, ClipboardList, LogOut, MessageCircle, Send, RefreshCw } from 'lucide-react';
+import { Home, ClipboardList, LogOut, MessageCircle, Send, RefreshCw } from 'lucide-react';
 import { auth } from '../lib/firebase';
 import { listMyConversation, listMyTasks, recordMyProgress, sendWorkerMessage, updateMyTaskStatus } from '../lib/operationsApi';
 import type { ChatMessage, TaskRecord } from '../types/operations';
@@ -71,7 +71,7 @@ export const WorkerDashboard: React.FC<Props> = ({ worker }) => {
   return <section dir="rtl" className="w-full max-w-3xl space-y-4">
     <header className="flex items-center justify-between gap-3 rounded-2xl border border-[#D4AF37]/35 bg-gradient-to-l from-[#211B0B] to-[#111] p-4">
       <div><h2 className="text-lg font-bold text-[#F5D77F]">{page === 'home' ? 'الرئيسية' : page === 'tasks' ? 'مهامي' : 'المحادثة'}</h2><p className="text-sm text-gray-300">{worker.name}</p></div>
-      <div className="flex items-center gap-2">{page !== 'home' && <button onClick={() => { setPage('home'); setError(''); setNotice(''); }} className="secondary-button"><ArrowRight className="w-4 h-4" /> الرئيسية</button>}<button className="danger-button" onClick={() => void signOut(auth)}><LogOut className="w-4 h-4" /> خروج</button></div>
+      <div className="flex items-center gap-2">{page !== 'home' && <button type="button" onClick={() => { setPage('home'); setError(''); setNotice(''); }} aria-label="العودة إلى واجهة الاستقبال" title="العودة إلى واجهة الاستقبال" className="flex h-10 w-10 items-center justify-center rounded-full border border-[#D4AF37]/50 bg-[#D4AF37]/10 text-[#F5D77F] transition hover:bg-[#D4AF37]/20 focus:outline-none focus:ring-2 focus:ring-[#D4AF37]"><Home className="h-5 w-5" /></button>}<button className="danger-button" onClick={() => void signOut(auth)}><LogOut className="w-4 h-4" /> خروج</button></div>
     </header>
 
     {page === 'home' && <>
