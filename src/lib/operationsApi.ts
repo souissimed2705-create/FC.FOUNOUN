@@ -42,7 +42,11 @@ export const freezeManagementAccount = (uid: string) => request<OperationsRespon
 export const listContacts = () => request<OperationsResponse<ContactRecord[]>>('/api/contacts');
 export const listDirectMessages = (otherUid: string) => request<OperationsResponse<ChatMessage[]>>(`/api/direct-messages/${encodeURIComponent(otherUid)}`);
 export const sendDirectMessage = (otherUid: string, text: string) => request<OperationsResponse<ChatMessage>>(`/api/direct-messages/${encodeURIComponent(otherUid)}`, { method: 'POST', body: JSON.stringify({ text }) });
-export const listMyMachineCycles = () => request<OperationsResponse<MachineCycleRecord[]>>('/api/worker/cycles');
+export const listMyMachineCycles = (pageToken?: string | null) => {
+  const params = new URLSearchParams({ pageSize: '100' });
+  if (pageToken) params.set('pageToken', pageToken);
+  return request<OperationsResponse<MachineCycleRecord[]> & { nextPageToken?: string | null }>(`/api/worker/cycles?${params.toString()}`);
+};
 export const submitMachineCycle = (count: number, photo: string, recordedAt: string) => request<OperationsResponse<MachineCycleRecord>>('/api/worker/cycles', { method: 'POST', body: JSON.stringify({ count, photo, recordedAt }) });
 
 type QueuedMutation = { id: string; path: string; init: RequestInit; createdAt: string };
