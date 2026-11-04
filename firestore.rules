@@ -47,6 +47,11 @@ service cloud.firestore {
       allow read, write: if false;
     }
 
+    // Worker machine/shift reservations are backend-only coordination records.
+    match /worker_machine_slots/{slotId} {
+      allow read, write: if false;
+    }
+
     // Tasks, progress ledger, conversations and cycle reports must only be
     // accessed through Worker endpoints enforcing role/ownership checks.
     match /tasks/{taskId} {
