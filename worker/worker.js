@@ -404,8 +404,8 @@ async function handleCreateResource(request, resource, callerUid, projectId, acc
     if (duplicateName) throw createHttpError('اسم مشرف العمال مستخدم بالفعل؛ اختر اسماً مميزاً لتسجيل الدخول به', 409, 'worker_name_taken');
     if (![1, 2, 3].includes(payload.machineNumber) || !['day', 'night'].includes(payload.shift)) throw createHttpError('يجب تعيين كل مشرف عمال إلى مكينة ووردية محددتين', 400, 'worker_assignment_required');
     if (payload.status !== 'inactive') {
-      const existingWorkers = await listAllFirestoreDocs(projectId, accessToken, 'workers', 100, 500);
-      const occupied = existingWorkers.documents.map(doc => convertFromFirestoreFields(doc.fields || {})).some(worker => worker.status === 'active' && worker.machineNumber === payload.machineNumber && worker.shift === payload.shift);
+      const occupied = existingWorkers.documents.map(doc => convertFromFirestoreFields(doc.fields || {}))
+        .some(worker => worker.status === 'active' && worker.machineNumber === payload.machineNumber && worker.shift === payload.shift);
       if (occupied) throw createHttpError('هذه المكينة والوردية مرتبطتان بالفعل بمشرف عمال نشط', 409, 'machine_shift_already_assigned');
     }
   }
@@ -426,6 +426,11 @@ async function handleCreateResource(request, resource, callerUid, projectId, acc
   }
   const record = { id, ...defaults, ...payload, ...taskDetails, createdBy: callerUid, createdAt: now, updatedAt: now };
   const writes = [{ update: { name: `projects/${projectId}/databases/(default)/documents/${resource}/${id}`, fields: convertToFirestoreFields(record) }, currentDocument: { exists: false } }];
+  if (resource === 'workers' && record.status === 'active') {
+    const slotPath = workerMachineSlotPath(record.machineNumber, record.shift);
+    const slotDoc = await getFirestoreDoc(projectId, accessToken, slotPath);
+    writes.push(buildWorkerMachineReservationWrite(projectId, id, record.machineNumber, record.shift, slotDoc, true));
+  }
   await commitFirestoreTransaction(projectId, accessToken, null, writes);
   return jsonResponse({ success: true, [resource === 'workers' ? 'worker' : 'task']: record }, 201, corsHeaders);
 }
@@ -450,11 +455,6 @@ async function handleUpdateResource(request, resource, id, callerUid, projectId,
     const targetMachine = changes.machineNumber ?? current.machineNumber;
     const targetShift = changes.shift ?? current.shift;
     if (![1, 2, 3].includes(targetMachine) || !['day', 'night'].includes(targetShift)) throw createHttpError('يجب تعيين المكينة والوردية معاً', 400, 'worker_assignment_required');
-    if ((changes.status ?? current.status) === 'active') {
-      const existingWorkers = await listAllFirestoreDocs(projectId, accessToken, 'workers', 100, 500);
-      const occupied = existingWorkers.documents.map(doc => convertFromFirestoreFields(doc.fields || {})).some(worker => worker.id !== id && worker.status === 'active' && worker.machineNumber === targetMachine && worker.shift === targetShift);
-      if (occupied) throw createHttpError('هذه المكينة والوردية مرتبطتان بالفعل بمشرف عمال نشط', 409, 'machine_shift_already_assigned');
-    }
   }
 
   if (resource === 'tasks') {
@@ -501,7 +501,34 @@ async function handleUpdateResource(request, resource, id, callerUid, projectId,
 
   const record = { ...current, ...changes, updatedBy: callerUid, updatedAt: new Date().toISOString() };
   const write = { update: { name: `projects/${projectId}/databases/(default)/documents/${resource}/${id}`, fields: convertToFirestoreFields(record) }, currentDocument: { updateTime: currentDoc.updateTime } };
-  await commitFirestoreTransaction(projectId, accessToken, null, [write]);
+  const writes = [write];
+  if (resource === 'workers') {
+    const wasActive = current.status === 'active';
+    const willBeActive = record.status === 'active';
+    const oldAssignmentValid = [1, 2, 3].includes(current.machineNumber) && ['day', 'night'].includes(current.shift);
+    const newAssignmentValid = [1, 2, 3].includes(record.machineNumber) && ['day', 'night'].includes(record.shift);
+    if (willBeActive && !newAssignmentValid) throw createHttpError('يجب تعيين المكينة والوردية قبل تفعيل الحساب', 400, 'worker_assignment_required');
+    if (willBeActive) {
+      const targetPath = workerMachineSlotPath(record.machineNumber, record.shift);
+      const targetSlot = await getFirestoreDoc(projectId, accessToken, targetPath);
+      if (!targetSlot) {
+        const allWorkers = await listAllFirestoreDocs(projectId, accessToken, 'workers', 100, 500);
+        const occupiedLegacy = allWorkers.documents.map(doc => convertFromFirestoreFields(doc.fields || {}))
+          .some(worker => worker.id !== id && worker.status === 'active' && worker.machineNumber === record.machineNumber && worker.shift === record.shift);
+        if (occupiedLegacy) throw createHttpError('هذه المكينة والوردية مرتبطتان بالفعل بمشرف عمال نشط', 409, 'machine_shift_already_assigned');
+      }
+      writes.push(buildWorkerMachineReservationWrite(projectId, id, record.machineNumber, record.shift, targetSlot, true));
+    }
+    const assignmentChanged = oldAssignmentValid &&
+      (current.machineNumber !== record.machineNumber || current.shift !== record.shift);
+    if ((!willBeActive || assignmentChanged) && oldAssignmentValid) {
+      const oldPath = workerMachineSlotPath(current.machineNumber, current.shift);
+      const oldSlot = await getFirestoreDoc(projectId, accessToken, oldPath);
+      const release = buildWorkerMachineReservationWrite(projectId, id, current.machineNumber, current.shift, oldSlot, false);
+      if (release) writes.push(release);
+    }
+  }
+  await commitFirestoreTransaction(projectId, accessToken, null, writes);
   return jsonResponse({ success: true, [resource === 'workers' ? 'worker' : 'task']: sanitizeResourceOutput(record, resource) }, 200, corsHeaders);
 }
 
@@ -569,7 +596,32 @@ export function buildResponsibleShiftReservationWrite(projectId, uid, shift, slo
   return write;
 }
 
-export function buildWorkerFreezeUpdate(current, timestamp) {
+export export function workerMachineSlotPath(machineNumber, shift) {
+  if (![1, 2, 3].includes(machineNumber) || !['day', 'night'].includes(shift)) {
+    throw createHttpError('تعيين المكينة أو الوردية غير صالح', 400, 'worker_assignment_required');
+  }
+  return `worker_machine_slots/m${machineNumber}_${shift}`;
+}
+
+export function buildWorkerMachineReservationWrite(projectId, workerId, machineNumber, shift, slotDoc, active) {
+  const path = workerMachineSlotPath(machineNumber, shift);
+  const existing = slotDoc ? convertFromFirestoreFields(slotDoc.fields || {}) : null;
+  if (!active && (!existing || existing.workerId !== workerId || existing.status !== 'active')) return null;
+  if (active && existing && existing.status === 'active' && existing.workerId !== workerId) {
+    throw createHttpError('هذه المكينة والوردية محجوزتان لمشرف عمال آخر', 409, 'machine_shift_already_assigned');
+  }
+  const record = { workerId, machineNumber, shift, status: active ? 'active' : 'inactive', updatedAt: new Date().toISOString() };
+  const write = {
+    update: {
+      name: `projects/${projectId}/databases/(default)/documents/${path}`,
+      fields: convertToFirestoreFields(record)
+    }
+  };
+  write.currentDocument = slotDoc?.updateTime ? { updateTime: slotDoc.updateTime } : { exists: false };
+  return write;
+}
+
+function buildWorkerFreezeUpdate(current, timestamp) {
   return { ...current, status: 'inactive', frozenAt: timestamp, updatedAt: timestamp };
 }
 
@@ -581,13 +633,19 @@ async function handleDeleteResource(id, resource, projectId, accessToken, corsHe
     const existing = convertFromFirestoreFields(current.fields || {});
     const timestamp = new Date().toISOString();
     const frozen = buildWorkerFreezeUpdate(existing, timestamp);
-    await commitFirestoreTransaction(projectId, accessToken, null, [{
+    const writes = [{
       update: {
         name: `projects/${projectId}/databases/(default)/documents/workers/${id}`,
         fields: convertToFirestoreFields(frozen)
       },
       currentDocument: { updateTime: current.updateTime }
-    }]);
+    }];
+    if ([1, 2, 3].includes(existing.machineNumber) && ['day', 'night'].includes(existing.shift)) {
+      const slot = await getFirestoreDoc(projectId, accessToken, workerMachineSlotPath(existing.machineNumber, existing.shift));
+      const release = buildWorkerMachineReservationWrite(projectId, id, existing.machineNumber, existing.shift, slot, false);
+      if (release) writes.push(release);
+    }
+    await commitFirestoreTransaction(projectId, accessToken, null, writes);
     return jsonResponse({ success: true, id, status: 'inactive', frozen: true }, 200, corsHeaders);
   }
   throw createHttpError('الحذف الدائم غير مسموح لهذا المورد', 405, 'permanent_delete_forbidden');
