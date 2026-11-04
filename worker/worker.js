@@ -365,7 +365,7 @@ async function handleWorkerLogin(request, env, projectId, accessToken, corsHeade
   const payload = await parseJsonBody(request);
   const workerId = typeof payload?.workerId === 'string' ? payload.workerId.trim() : '';
   const pin = typeof payload?.pin === 'string' ? payload.pin : '';
-  if (!RESOURCE_ID_REGEX.test(workerId) || !/^\\d{6}$/.test(pin)) {
+  if (!RESOURCE_ID_REGEX.test(workerId) || !/^\d{6}$/.test(pin)) {
     throw createHttpError('أدخل رمز العامل وPIN من 6 أرقام', 400, 'invalid_worker_credentials');
   }
   const workerDoc = await getFirestoreDoc(projectId, accessToken, `workers/${workerId}`);
