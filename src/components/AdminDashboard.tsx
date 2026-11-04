@@ -15,7 +15,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ admin, onLogout,
   const roleName = isSupervisor ? 'المشرف العام' : admin.role === 'responsible' ? 'المسؤول' : 'المدير العام';
   const greeting = isSupervisor
     ? 'أهلاً بك. أشرف على العمال ورموز الدخول وتابع سير الإنتاج.'
-    : admin.role === 'responsible' ? 'أهلاً بك. أنشئ أوامر الإنتاج وتابع تقارير دورات المكائن وتواصل مع مشرفي العمال.' : 'أهلاً بك. أشرف على سير الإنتاج وأدر العمليات المسموح بها.';
+    : admin.role === 'responsible' ? 'أهلاً بك. أدر مشرفي العمال والمكائن والورديات والموديلات وأوامر الإنتاج.' : 'أهلاً بك. أشرف على سير الإنتاج وأدر العمليات المسموح بها.';
 
   const go = (next: Page) => setPage(next);
   const backHome = () => setPage('home');
@@ -74,7 +74,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ admin, onLogout,
       </div>
     </>}
 
-    {page === 'models' && <ModelsPanel readOnly={admin.role === 'responsible'} />}
+    {page === 'models' && <ModelsPanel readOnly={false} />}
     {page === 'tasks' && <OperationsPanel initialSection="tasks" admin={admin} />}
     {page === 'supervisor' && isSupervisor && <section className="space-y-3 rounded-2xl border border-[#D4AF37]/25 bg-[#111] p-4">
       <div><h3 className="font-bold text-[#F5D77F]">أدوات المشرف</h3><p className="mt-1 text-xs leading-6 text-gray-400">هذه الصفحة خاصة بحساب المشرف، ولا تظهر للمسؤول أو العامل.</p></div>
