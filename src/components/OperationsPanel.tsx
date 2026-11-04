@@ -103,8 +103,13 @@ export const OperationsPanel: React.FC<Props> = ({ initialSection, admin }) => {
 
 
   useEffect(() => {
-    void refresh();
-    const handler = async () => { await flushQueuedMutations(); setPending(queuedMutationCount()); void refresh(); };
+    const handler = async () => {
+      await flushQueuedMutations();
+      setPending(queuedMutationCount());
+      void refresh();
+    };
+    // Resume saved management operations after a reload as soon as the app is online.
+    void handler();
     window.addEventListener('online', handler);
     return () => window.removeEventListener('online', handler);
   }, []);
