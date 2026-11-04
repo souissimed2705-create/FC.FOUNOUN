@@ -972,6 +972,23 @@ async function handleDirectMessages(request, otherUid, callerUid, callerRole, pr
   return jsonResponse({ success: true, data: message }, 201, corsHeaders);
 }
 
+export function resolveCycleRecordedAt(clientRecordedAt, serverNow = new Date()) {
+  if (clientRecordedAt === undefined || clientRecordedAt === null || clientRecordedAt === '') {
+    return serverNow.toISOString();
+  }
+  if (typeof clientRecordedAt !== 'string') {
+    throw createHttpError('وقت تسجيل التقرير غير صالح', 400, 'invalid_cycle_recorded_at');
+  }
+  const parsed = new Date(clientRecordedAt);
+  if (!Number.isFinite(parsed.getTime()) || parsed.toISOString() !== clientRecordedAt) {
+    throw createHttpError('وقت تسجيل التقرير غير صالح', 400, 'invalid_cycle_recorded_at');
+  }
+  if (parsed.getTime() > serverNow.getTime() + 5 * 60 * 1000) {
+    throw createHttpError('وقت تسجيل التقرير لا يمكن أن يكون في المستقبل', 400, 'future_cycle_recorded_at');
+  }
+  return parsed.toISOString();
+}
+
 async function handleWorkerCycles(request, workerId, projectId, accessToken, corsHeaders) {
   const workerDoc = await getFirestoreDoc(projectId, accessToken, `workers/${workerId}`);
   if (!workerDoc) throw createHttpError('حساب مشرف العمال غير موجود', 403, 'worker_inactive');
@@ -996,8 +1013,9 @@ async function handleWorkerCycles(request, workerId, projectId, accessToken, cor
   if (!photo || photo.length > 480000 || !/^data:image\/(?:jpeg|webp);base64,[A-Za-z0-9+/]+={0,2}$/.test(photo)) {
     throw createHttpError('صورة العداد غير صالحة أو حجمها كبير؛ أعد اختيار صورة مضغوطة', 400, 'invalid_counter_photo');
   }
-  const now = new Date();
-  const dateParts = new Intl.DateTimeFormat('en-GB', { timeZone: 'Africa/Tunis', year: 'numeric', month: '2-digit', day: '2-digit' }).formatToParts(now);
+  const receivedAt = new Date();
+  const recordedAt = resolveCycleRecordedAt(payload.recordedAt, receivedAt);
+  const dateParts = new Intl.DateTimeFormat('en-GB', { timeZone: 'Africa/Tunis', year: 'numeric', month: '2-digit', day: '2-digit' }).formatToParts(new Date(recordedAt));
   const datePart = Object.fromEntries(dateParts.filter(part => part.type !== 'literal').map(part => [part.type, part.value]));
   const date = `${datePart.year}-${datePart.month}-${datePart.day}`;
   const shift = worker.shift;
@@ -1012,7 +1030,7 @@ async function handleWorkerCycles(request, workerId, projectId, accessToken, cor
   const record = {
     id, machineNumber, shift, date, count: payload.count, photo,
     workerId, workerName: String(worker.name || 'مشرف العمال').slice(0, 100),
-    recordedAt: now.toISOString(), updatedAt: now.toISOString()
+    recordedAt, receivedAt: receivedAt.toISOString(), updatedAt: receivedAt.toISOString()
   };
   const write = {
     update: { name: `projects/${projectId}/databases/(default)/documents/${path}`, fields: convertToFirestoreFields(record) },
