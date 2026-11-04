@@ -576,10 +576,10 @@ async function handleDeleteResource(id, resource, projectId, accessToken, corsHe
 
 
 async function handleListManagementAccounts(projectId, accessToken, corsHeaders) {
-  const result = await listFirestoreDocs(projectId, accessToken, 'users', 100);
-  const accounts = result.documents.map(doc => convertFromFirestoreFields(doc.fields || {}))
+  const result = await listAllFirestoreDocs(projectId, accessToken, 'users', 100, 500);
+  const accounts = result.documents.map(doc => ({ ...convertFromFirestoreFields(doc.fields || {}), uid: doc.name?.split('/').pop() }))
     .filter(user => ['admin', 'responsible'].includes(user.role))
-    .map(user => ({ uid: user.uid || user.id, displayName: user.displayName || user.name || '', role: user.role, status: user.status, shift: user.shift || null, createdAt: user.createdAt || null }));
+    .map(user => ({ uid: user.uid, displayName: user.displayName || user.name || '', role: user.role, status: user.status, shift: user.shift || null, createdAt: user.createdAt || null }));
   return jsonResponse({ success: true, data: accounts }, 200, corsHeaders);
 }
 
@@ -594,7 +594,7 @@ async function handleCreateManagementAccount(request, callerUid, projectId, acce
   }
   if (role === 'responsible' && !['day', 'night'].includes(shift)) throw createHttpError('يجب تحديد وردية المسؤول: نهار أو ليل', 400, 'responsible_shift_required');
   if (role === 'admin' && shift !== undefined) throw createHttpError('حساب المدير العام لا يحتاج إلى وردية', 400, 'unexpected_shift');
-  const result = await listFirestoreDocs(projectId, accessToken, 'users', 100);
+  const result = await listAllFirestoreDocs(projectId, accessToken, 'users', 100, 500);
   const accounts = result.documents.map(doc => convertFromFirestoreFields(doc.fields || {})).filter(user => user.role === role);
   if (accounts.some(user => String(user.displayName || user.name || '').trim().toLocaleLowerCase() === name.toLocaleLowerCase())) {
     throw createHttpError('يوجد حساب من النوع نفسه بهذا الاسم بالفعل', 409, 'management_name_taken');
@@ -646,7 +646,7 @@ async function handleUpdateManagementAccount(request, uid, callerUid, projectId,
   const changes = {};
   if (payload.name !== undefined) {
     if (typeof payload.name !== 'string' || !payload.name.trim() || payload.name.trim().length > 80) throw createHttpError('اسم الحساب غير صالح', 400, 'invalid_management_name');
-    const all = await listFirestoreDocs(projectId, accessToken, 'users', 100);
+    const all = await listAllFirestoreDocs(projectId, accessToken, 'users', 100, 500);
     const duplicate = all.documents.map(d => ({ ...convertFromFirestoreFields(d.fields || {}), uid: d.name?.split('/').pop() }))
       .some(user => user.uid !== uid && user.role === current.role && String(user.displayName || user.name || '').trim().toLocaleLowerCase() === payload.name.trim().toLocaleLowerCase());
     if (duplicate) throw createHttpError('الاسم مستخدم في حساب آخر من النوع نفسه', 409, 'management_name_taken');
@@ -654,15 +654,15 @@ async function handleUpdateManagementAccount(request, uid, callerUid, projectId,
   }
   if (payload.shift !== undefined) {
     if (current.role !== 'responsible' || !['day', 'night'].includes(payload.shift)) throw createHttpError('الوردية غير صالحة لهذا الحساب', 400, 'invalid_responsible_shift');
-    const all = await listFirestoreDocs(projectId, accessToken, 'users', 100);
-    if (all.documents.map(d => convertFromFirestoreFields(d.fields || {})).some(user => (user.uid || user.id) !== uid && user.role === 'responsible' && user.status === 'active' && user.shift === payload.shift)) throw createHttpError('هذه الوردية مخصصة لحساب مسؤول آخر', 409, 'responsible_shift_taken');
+    const all = await listAllFirestoreDocs(projectId, accessToken, 'users', 100, 500);
+    if (all.documents.map(d => ({ ...convertFromFirestoreFields(d.fields || {}), uid: d.name?.split('/').pop() })).some(user => user.uid !== uid && user.role === 'responsible' && user.status === 'active' && user.shift === payload.shift)) throw createHttpError('هذه الوردية مخصصة لحساب مسؤول آخر', 409, 'responsible_shift_taken');
     changes.shift = payload.shift;
   }
   if (payload.status !== undefined) {
     if (!['active', 'inactive'].includes(payload.status)) throw createHttpError('حالة الحساب غير صالحة', 400, 'invalid_management_status');
     changes.status = payload.status;
   }
-  const allAccounts = (await listFirestoreDocs(projectId, accessToken, 'users', 100)).documents
+  const allAccounts = (await listAllFirestoreDocs(projectId, accessToken, 'users', 100, 500)).documents
     .map(item => ({ ...convertFromFirestoreFields(item.fields || {}), uid: item.name?.split('/').pop() }));
   assertManagementAccountUpdateAllowed(current, changes, allAccounts, uid, callerUid);
   const record = { ...current, ...changes, updatedBy: callerUid, updatedAt: new Date().toISOString() };
@@ -690,12 +690,12 @@ async function handleManagementLogin(request, env, projectId, accessToken, corsH
   if (!name || name.length > 100 || !/^\d{6}$/.test(code) || !['admin', 'responsible'].includes(role)) {
     throw createHttpError('أدخل الاسم والكود السري الصحيحين واختر نوع الحساب', 400, 'invalid_management_credentials');
   }
-  const result = await listFirestoreDocs(projectId, accessToken, 'users', 100);
-  const matches = result.documents.map(doc => convertFromFirestoreFields(doc.fields || {}))
+  const result = await listAllFirestoreDocs(projectId, accessToken, 'users', 100, 500);
+  const matches = result.documents.map(doc => ({ ...convertFromFirestoreFields(doc.fields || {}), uid: doc.name?.split('/').pop() }))
     .filter(user => user.role === role && user.status === 'active' && String(user.displayName || user.name || '').trim().toLocaleLowerCase() === name.toLocaleLowerCase());
   if (matches.length !== 1) throw createHttpError('الاسم أو الكود السري غير صحيح', 401, 'invalid_management_credentials');
   const user = matches[0];
-  const uid = user.uid || user.id;
+  const uid = user.uid;
   if (!uid) throw createHttpError('ملف الحساب غير مكتمل', 403, 'management_account_invalid');
   const codeDoc = await getFirestoreDoc(projectId, accessToken, `management_codes/${uid}`);
   if (!codeDoc) throw createHttpError('لم يعيّن المشرف العام كود دخول لهذا الحساب بعد', 403, 'management_code_missing');
