@@ -13,6 +13,7 @@ interface Props { initialSection: 'workers' | 'tasks'; admin: UserProfile; }
 
 export const OperationsPanel: React.FC<Props> = ({ initialSection, admin }) => {
   const isSupervisor = admin.role === 'super_admin';
+  const canFreezeWorkers = ['super_admin', 'admin'].includes(admin.role);
   const isResponsible = admin.role === 'responsible';
   const canManageWorkers = ['super_admin', 'admin', 'responsible'].includes(admin.role);
   const [section, setSection] = useState<Section>(initialSection);
@@ -193,7 +194,7 @@ export const OperationsPanel: React.FC<Props> = ({ initialSection, admin }) => {
           if (pinId !== w.id || !/^\d{6}$/.test(pin)) { setError('PIN يجب أن يتكون من 6 أرقام بالضبط.'); return; }
           void runMutation(() => setWorkerPin(w.id, pin)); setPin(''); setPinId('');
         }}>حفظ PIN</button>
-        {isSupervisor && <button className={w.status === 'active' ? 'danger-button' : 'secondary-button'} onClick={() => void runMutation(() => updateWorker(w.id, { status: w.status === 'active' ? 'inactive' : 'active' }))}>{w.status === 'active' ? 'تجميد الحساب' : 'إعادة التفعيل'}</button>}
+        {canFreezeWorkers && <button className={w.status === 'active' ? 'danger-button' : 'secondary-button'} onClick={() => void runMutation(() => updateWorker(w.id, { status: w.status === 'active' ? 'inactive' : 'active' }))}>{w.status === 'active' ? 'تجميد الحساب' : 'إعادة التفعيل'}</button>}
       </div>)}</div>
     </div>}
 
