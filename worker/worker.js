@@ -387,7 +387,7 @@ async function handleListResource(request, resource, projectId, accessToken, cor
   const url = new URL(request.url);
   const requested = Number(url.searchParams.get('pageSize') || '50');
   const pageSize = Number.isInteger(requested) ? Math.min(Math.max(requested, 1), 100) : 50;
-  const result = await listFirestoreDocs(projectId, accessToken, resource, pageSize);
+  const result = await listAllFirestoreDocs(projectId, accessToken, resource, 100, 500);
   const records = result.documents.map((doc) => sanitizeResourceOutput(convertFromFirestoreFields(doc.fields || {}), resource));
   const visibleRecords = resource === 'workers' && callerRole !== 'super_admin'
     ? records.map(worker => ({ id: worker.id, name: worker.name, status: worker.status, machineNumber: worker.machineNumber, shift: worker.shift }))
@@ -399,12 +399,12 @@ async function handleCreateResource(request, resource, callerUid, projectId, acc
   const payload = await parseJsonBody(request);
   validateResourcePayload(payload, resource, true);
   if (resource === 'workers') {
-    const existingWorkers = await listFirestoreDocs(projectId, accessToken, 'workers', 100);
+    const existingWorkers = await listAllFirestoreDocs(projectId, accessToken, 'workers', 100, 500);
     const duplicateName = existingWorkers.documents.map(doc => convertFromFirestoreFields(doc.fields || {})).some(worker => worker.status === 'active' && String(worker.name || '').trim().toLocaleLowerCase() === payload.name.trim().toLocaleLowerCase());
     if (duplicateName) throw createHttpError('اسم مشرف العمال مستخدم بالفعل؛ اختر اسماً مميزاً لتسجيل الدخول به', 409, 'worker_name_taken');
     if (![1, 2, 3].includes(payload.machineNumber) || !['day', 'night'].includes(payload.shift)) throw createHttpError('يجب تعيين كل مشرف عمال إلى مكينة ووردية محددتين', 400, 'worker_assignment_required');
     if (payload.status !== 'inactive') {
-      const existingWorkers = await listFirestoreDocs(projectId, accessToken, 'workers', 100);
+      const existingWorkers = await listAllFirestoreDocs(projectId, accessToken, 'workers', 100, 500);
       const occupied = existingWorkers.documents.map(doc => convertFromFirestoreFields(doc.fields || {})).some(worker => worker.status === 'active' && worker.machineNumber === payload.machineNumber && worker.shift === payload.shift);
       if (occupied) throw createHttpError('هذه المكينة والوردية مرتبطتان بالفعل بمشرف عمال نشط', 409, 'machine_shift_already_assigned');
     }
@@ -442,7 +442,7 @@ async function handleUpdateResource(request, resource, id, callerUid, projectId,
   const changes = { ...payload };
 
   if (resource === 'workers' && changes.name !== undefined && (changes.status ?? current.status) === 'active') {
-    const existingWorkers = await listFirestoreDocs(projectId, accessToken, 'workers', 100);
+    const existingWorkers = await listAllFirestoreDocs(projectId, accessToken, 'workers', 100, 500);
     const duplicateName = existingWorkers.documents.map(doc => convertFromFirestoreFields(doc.fields || {})).some(worker => worker.id !== id && worker.status === 'active' && String(worker.name || '').trim().toLocaleLowerCase() === changes.name.trim().toLocaleLowerCase());
     if (duplicateName) throw createHttpError('اسم مشرف العمال مستخدم بالفعل؛ اختر اسماً مميزاً لتسجيل الدخول به', 409, 'worker_name_taken');
   }
@@ -451,7 +451,7 @@ async function handleUpdateResource(request, resource, id, callerUid, projectId,
     const targetShift = changes.shift ?? current.shift;
     if (![1, 2, 3].includes(targetMachine) || !['day', 'night'].includes(targetShift)) throw createHttpError('يجب تعيين المكينة والوردية معاً', 400, 'worker_assignment_required');
     if ((changes.status ?? current.status) === 'active') {
-      const existingWorkers = await listFirestoreDocs(projectId, accessToken, 'workers', 100);
+      const existingWorkers = await listAllFirestoreDocs(projectId, accessToken, 'workers', 100, 500);
       const occupied = existingWorkers.documents.map(doc => convertFromFirestoreFields(doc.fields || {})).some(worker => worker.id !== id && worker.status === 'active' && worker.machineNumber === targetMachine && worker.shift === targetShift);
       if (occupied) throw createHttpError('هذه المكينة والوردية مرتبطتان بالفعل بمشرف عمال نشط', 409, 'machine_shift_already_assigned');
     }
@@ -779,7 +779,7 @@ async function handleWorkerLogin(request, env, projectId, accessToken, corsHeade
   if (!workerName || workerName.length > 100 || !/^\d{6}$/.test(pin)) {
     throw createHttpError('أدخل اسم مشرف العمال والكود السري المكوّن من 6 أرقام', 400, 'invalid_worker_credentials');
   }
-  const workerList = await listFirestoreDocs(projectId, accessToken, 'workers', 100);
+  const workerList = await listAllFirestoreDocs(projectId, accessToken, 'workers', 100, 500);
   const matchingWorkers = workerList.documents.map(doc => ({ doc, worker: convertFromFirestoreFields(doc.fields || {}) }))
     .filter(item => item.worker.status === 'active' && String(item.worker.name || '').trim().toLocaleLowerCase() === workerName.toLocaleLowerCase());
   if (matchingWorkers.length !== 1) throw createHttpError('الاسم أو الكود السري غير صحيح، أو أن الاسم غير فريد', 401, 'invalid_worker_credentials');
@@ -1151,7 +1151,7 @@ async function handleWorkerListTasks(workerId, projectId, accessToken, corsHeade
   if (!workerDoc || convertFromFirestoreFields(workerDoc.fields || {}).status !== 'active') {
     throw createHttpError('حساب العامل غير نشط', 403, 'worker_inactive');
   }
-  const result = await listFirestoreDocs(projectId, accessToken, 'tasks', 100);
+  const result = await listAllFirestoreDocs(projectId, accessToken, 'tasks', 100, 500);
   const tasks = result.documents
     .map(doc => convertFromFirestoreFields(doc.fields || {}))
     .filter(task => task.assignedWorkerId === workerId)
