@@ -905,7 +905,7 @@ async function handleListContacts(callerUid, projectId, accessToken, corsHeaders
   return jsonResponse({ success: true, data: contacts }, 200, corsHeaders);
 }
 
-async function readDirectConversation(conversationId, projectId, accessToken) {
+async function readDirectConversation(conversationId, uidA, uidB, projectId, accessToken) {
   const url = `${FIRESTORE_BASE_URL}/${projectId}/databases/(default)/documents:runQuery`;
   const response = await fetch(url, {
     method: 'POST',
@@ -924,9 +924,12 @@ async function readDirectConversation(conversationId, projectId, accessToken) {
   const rows = await response.json();
   return rows.filter(row => row.document).map(row => {
     const message = convertFromFirestoreFields(row.document.fields || {});
+    // Defense in depth: do not return any message whose own participant list
+    // does not match the exact two users, even if its conversationId matches.
+    if (!isExactParticipantPair(message.participants, uidA, uidB)) return null;
     message.id = message.id || firestoreDocumentId(row.document.name);
     return message;
-  }).sort((a, b) => String(a.createdAt || '').localeCompare(String(b.createdAt || '')));
+  }).filter(Boolean).sort((a, b) => String(a.createdAt || '').localeCompare(String(b.createdAt || '')));
 }
 
 async function handleDirectMessages(request, otherUid, callerUid, callerRole, projectId, accessToken, corsHeaders) {
@@ -946,7 +949,7 @@ async function handleDirectMessages(request, otherUid, callerUid, callerRole, pr
     if (!isExactParticipantPair(conversation.participants, callerUid, otherUid)) {
       throw createHttpError('لا تملك صلاحية الاطلاع على هذه المحادثة', 403, 'direct_conversation_forbidden');
     }
-    const messages = await readDirectConversation(conversationId, projectId, accessToken);
+    const messages = await readDirectConversation(conversationId, callerUid, otherUid, projectId, accessToken);
     return jsonResponse({ success: true, data: messages }, 200, corsHeaders);
   }
   const payload = await parseJsonBody(request);
