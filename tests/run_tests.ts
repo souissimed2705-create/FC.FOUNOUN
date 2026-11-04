@@ -27,6 +27,7 @@ import {
   validateGoogleJwk,
   safeDecodeUriSegment,
   buildWorkerFreezeUpdate,
+  assertWorkerManagementPermission,
 } from '../worker/worker.js';
 
 export async function runAllTests() {
@@ -318,6 +319,16 @@ export async function runAllTests() {
 
   // 9. Worker account freeze is reversible; the record is retained, never hard-deleted.
   console.log('\n9. اختبارات تجميد حساب العامل دون حذفه:');
+  let adminWorkerWriteDenied = false;
+  try { assertWorkerManagementPermission('admin', 'POST'); }
+  catch (err: any) { adminWorkerWriteDenied = err.code === 'super_admin_only_worker_management' && err.status === 403; }
+  assert(adminWorkerWriteDenied, 'منع المسؤول من إضافة عامل أو تعديل حسابه');
+  let adminWorkerPinDenied = false;
+  try { assertWorkerManagementPermission('admin', 'PUT', 'pin'); }
+  catch (err: any) { adminWorkerPinDenied = err.code === 'super_admin_only_worker_management'; }
+  assert(adminWorkerPinDenied, 'منع المسؤول من تغيير PIN العامل');
+  assert(assertWorkerManagementPermission('admin', 'GET') === true, 'السماح للمسؤول بقراءة قائمة العمال المحدودة لإسناد المهام');
+  assert(assertWorkerManagementPermission('super_admin', 'POST') === true, 'السماح للمشرف بإدارة حسابات العمال');
   const originalWorker = { id: 'wkr_test_001', name: 'عامل اختبار', status: 'active', phone: '20000000' };
   const frozenWorker = buildWorkerFreezeUpdate(originalWorker, '2026-11-04T10:00:00.000Z');
   assert(frozenWorker.status === 'inactive', 'تحويل حالة العامل إلى inactive عند التجميد');
