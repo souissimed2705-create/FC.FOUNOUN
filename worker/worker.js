@@ -347,7 +347,7 @@ async function handleListResource(request, resource, projectId, accessToken, cor
   const result = await listFirestoreDocs(projectId, accessToken, resource, pageSize);
   const records = result.documents.map((doc) => sanitizeResourceOutput(convertFromFirestoreFields(doc.fields || {}), resource));
   const visibleRecords = resource === 'workers' && callerRole === 'admin'
-    ? records.map(worker => ({ id: worker.id, name: worker.name, status: worker.status }))
+    ? records.map(worker => ({ id: worker.id, name: worker.name, status: worker.status, machineNumber: worker.machineNumber, shift: worker.shift }))
     : records;
   return jsonResponse({ success: true, [resource]: visibleRecords, nextPageToken: result.nextPageToken }, 200, corsHeaders);
 }
@@ -405,7 +405,13 @@ async function handleUpdateResource(request, resource, id, callerUid, projectId,
       if (!assignedWorkerDoc) throw createHttpError('العامل المحدد غير موجود', 404, 'worker_not_found');
       const assignedWorker = convertFromFirestoreFields(assignedWorkerDoc.fields || {});
       if (assignedWorker.status !== 'active') throw createHttpError('لا يمكن إسناد المهمة إلى عامل غير نشط', 409, 'worker_inactive');
+      if (![1, 2, 3].includes(assignedWorker.machineNumber) || !['day', 'night'].includes(assignedWorker.shift)) throw createHttpError('حساب مشرف العمال غير مربوط بمكينة ووردية', 409, 'worker_machine_assignment_missing');
       changes.assignedWorkerName = assignedWorker.name;
+      changes.machineNumber = assignedWorker.machineNumber;
+      changes.shift = assignedWorker.shift;
+    }
+    if (changes.assignedWorkerId === undefined && (changes.machineNumber !== undefined || changes.shift !== undefined)) {
+      throw createHttpError('المكينة والوردية تؤخذان تلقائياً من حساب مشرف العمال', 400, 'machine_assignment_read_only');
     }
     if (changes.modelId !== undefined) {
       if (typeof changes.modelId !== 'string' || !RESOURCE_ID_REGEX.test(changes.modelId)) {
