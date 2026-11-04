@@ -384,6 +384,9 @@ async function handleUpdateResource(request, resource, id, callerUid, projectId,
     delete changes.assignedWorkerName;
 
     if (changes.assignedWorkerId !== undefined) {
+      if (typeof changes.assignedWorkerId !== 'string' || !RESOURCE_ID_REGEX.test(changes.assignedWorkerId)) {
+        throw createHttpError('معرّف العامل غير صالح', 400, 'invalid_worker_id');
+      }
       const assignedWorkerDoc = await getFirestoreDoc(projectId, accessToken, `workers/${changes.assignedWorkerId}`);
       if (!assignedWorkerDoc) throw createHttpError('العامل المحدد غير موجود', 404, 'worker_not_found');
       const assignedWorker = convertFromFirestoreFields(assignedWorkerDoc.fields || {});
@@ -391,6 +394,9 @@ async function handleUpdateResource(request, resource, id, callerUid, projectId,
       changes.assignedWorkerName = assignedWorker.name;
     }
     if (changes.modelId !== undefined) {
+      if (typeof changes.modelId !== 'string' || !RESOURCE_ID_REGEX.test(changes.modelId)) {
+        throw createHttpError('معرّف المودال غير صالح', 400, 'invalid_model_id');
+      }
       const modelDoc = await getFirestoreDoc(projectId, accessToken, `models/${changes.modelId}`);
       if (!modelDoc) throw createHttpError('المودال المحدد غير موجود في الكتالوج', 404, 'model_not_found');
       const model = convertFromFirestoreFields(modelDoc.fields || {});
