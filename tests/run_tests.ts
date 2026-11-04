@@ -32,6 +32,7 @@ import {
   assertTaskCreationFieldsAllowed,
   assertTaskUpdateStatusAllowed,
   assertResponsibleWorkerFieldsAllowed,
+  sanitizeWorkerOutputForRole,
   assertSuperAdminManagementAccountsPermission,
   assertManagementAccountUpdateAllowed,
   buildResponsibleShiftReservationWrite,
@@ -475,6 +476,13 @@ export async function runAllTests() {
   assert(assertWorkerManagementPermission('admin', 'GET') === true, 'السماح للمدير العام بقراءة قائمة مشرفي العمال');
   assert(assertWorkerManagementPermission('responsible', 'GET') === true, 'السماح للمسؤول بعرض قائمة مشرفي العمال');
   assert(assertWorkerManagementPermission('responsible', 'POST') === true, 'السماح للمسؤول بإضافة مشرفي العمال');
+  const workerPrivateRecord = { id: 'wkr_1', name: 'عامل', phone: '123456', email: 'worker@example.test', notes: 'خاص', status: 'active', machineNumber: 1, shift: 'day', pin_hash: 'secret-hash' };
+  const responsibleWorkerView = sanitizeWorkerOutputForRole(workerPrivateRecord, 'responsible');
+  assert(!('phone' in responsibleWorkerView) && !('email' in responsibleWorkerView) && !('notes' in responsibleWorkerView) && !('pin_hash' in responsibleWorkerView),
+    'حجب بيانات الاتصال والملاحظات وأسرار PIN عن المسؤول');
+  const adminWorkerView = sanitizeWorkerOutputForRole(workerPrivateRecord, 'admin');
+  assert(adminWorkerView.phone === '123456' && adminWorkerView.email === 'worker@example.test' && !('pin_hash' in adminWorkerView),
+    'إظهار بيانات العامل للمدير مع حجب أسرار PIN');
   assert(assertResponsibleWorkerFieldsAllowed('responsible', { name: 'عامل', machineNumber: 1, shift: 'day' }) === true,
     'السماح للمسؤول بإنشاء مشرف عامل بالاسم والمكينة والوردية');
   assert(assertResponsibleWorkerFieldsAllowed('admin', { name: 'عامل', phone: '123', notes: 'ملاحظات' }) === true,
