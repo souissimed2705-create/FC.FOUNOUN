@@ -45,6 +45,7 @@ export async function workerLogin(workerId: string, pin: string): Promise<{ cust
   return { customToken: body.customToken, worker: body.worker };
 }
 export const listMyTasks = () => request<OperationsResponse<TaskRecord[]>>('/api/worker/tasks');
+export const updateMyTaskStatus = (id: string, status: 'pending' | 'in_progress') => request<OperationsResponse<TaskRecord>>(`/api/worker/tasks/${encodeURIComponent(id)}/status`, { method: 'PUT', body: JSON.stringify({ status }) });
 export const recordMyProgress = (id: string, payload: ProgressPayload) => request<OperationsResponse<TaskRecord>>(`/api/worker/tasks/${encodeURIComponent(id)}/progress`, { method: 'POST', body: JSON.stringify(payload) });
 export const listMyConversation = () => request<OperationsResponse<ChatMessage[]>>('/api/worker/messages');
 export const sendWorkerMessage = (text: string) => request<OperationsResponse<ChatMessage>>('/api/worker/messages', { method: 'POST', body: JSON.stringify({ text }) });
