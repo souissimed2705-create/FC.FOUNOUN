@@ -7,6 +7,7 @@ import React, { useState, useEffect } from 'react';
 import { AdminLoginForm } from './components/AdminLoginForm';
 import { AdminDashboard } from './components/AdminDashboard';
 import { WorkerLogin } from './components/WorkerLogin';
+import { NamedCodeLogin } from './components/NamedCodeLogin';
 import { WorkerDashboard } from './components/WorkerDashboard';
 import { PWAInstallBadge } from './components/PWAInstallBadge';
 import { useOnlineStatus } from './hooks/useOnlineStatus';
@@ -25,7 +26,7 @@ export default function App() {
   const isOnline = useOnlineStatus();
   const [verifiedAdmin, setVerifiedAdmin] = useState<UserProfile | null>(null);
   const [verifiedWorker, setVerifiedWorker] = useState<{ id: string; name: string } | null>(null);
-  const [loginMode, setLoginMode] = useState<'admin' | 'worker'>('admin');
+  const [loginMode, setLoginMode] = useState<'super_admin' | 'admin' | 'responsible' | 'worker'>('super_admin');
   const [isCheckingInitialAuth, setIsCheckingInitialAuth] = useState(true);
   const [sessionError, setSessionError] = useState<string | null>(null);
   const [isLoggingOut, setIsLoggingOut] = useState(false);
@@ -185,12 +186,16 @@ export default function App() {
             </div>
 
             <div className="mb-3 grid w-full grid-cols-2 gap-2 rounded-xl border border-white/10 bg-[#111] p-1">
-              <button className={`tab-button ${loginMode === 'admin' ? 'tab-active' : ''}`} onClick={() => setLoginMode('admin')}>دخول المشرف</button>
-              <button className={`tab-button ${loginMode === 'worker' ? 'tab-active' : ''}`} onClick={() => setLoginMode('worker')}>دخول العامل</button>
+              <button className={`tab-button ${loginMode === 'super_admin' ? 'tab-active' : ''}`} onClick={() => setLoginMode('super_admin')}>المشرف العام</button>
+              <button className={`tab-button ${loginMode === 'admin' ? 'tab-active' : ''}`} onClick={() => setLoginMode('admin')}>المدير العام</button>
+              <button className={`tab-button ${loginMode === 'responsible' ? 'tab-active' : ''}`} onClick={() => setLoginMode('responsible')}>المسؤول</button>
+              <button className={`tab-button ${loginMode === 'worker' ? 'tab-active' : ''}`} onClick={() => setLoginMode('worker')}>مشرف العمال</button>
             </div>
-            {loginMode === 'admin' ? (
+            {loginMode === 'super_admin' ? (
               <AdminLoginForm onSuccess={(admin) => setVerifiedAdmin(admin)} externalError={sessionError} onClearExternalError={() => setSessionError(null)} />
-            ) : <WorkerLogin />}
+            ) : loginMode === 'admin' ? <NamedCodeLogin role="admin" title="دخول المدير العام" />
+            : loginMode === 'responsible' ? <NamedCodeLogin role="responsible" title="دخول المسؤول" />
+            : <WorkerLogin />}
           </div>
         )}
       </main>
