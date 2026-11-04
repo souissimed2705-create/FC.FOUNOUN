@@ -22,7 +22,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ admin, onLogout,
       </div>
       <div className="mt-5 grid grid-cols-2 sm:grid-cols-4 gap-2 text-xs"><div className="stat"><ShieldCheck className="w-4 h-4 text-[#D4AF37]" /><span>{admin.role}</span></div><div className="stat"><KeyRound className="w-4 h-4 text-emerald-400" /><span>{admin.status}</span></div><div className="stat col-span-2"><span className="text-gray-400">المشروع:</span><span className="font-mono">fc-founoun</span></div></div>
     </header>
-    <nav className={`grid ${admin.role === "super_admin" ? "grid-cols-3" : "grid-cols-2"} gap-2 rounded-2xl border border-white/10 bg-[#111] p-2">{tabs.map(({ id, label, icon: Icon }) => <button key={id} onClick={() => setTab(id)} className={`tab-button ${tab === id ? 'tab-active' : ''}`}><Icon className="w-4 h-4" />{label}</button>)}</nav>
+    <nav className={`grid ${admin.role === "super_admin" ? "grid-cols-3" : "grid-cols-2"} gap-2 rounded-2xl border border-white/10 bg-[#111] p-2`}>{tabs.map(({ id, label, icon: Icon }) => <button key={id} onClick={() => setTab(id)} className={`tab-button ${tab === id ? 'tab-active' : ''}`}><Icon className="w-4 h-4" />{label}</button>)}</nav>
     {tab === 'models' && <ModelsPanel />}
     {tab === 'workers' && admin.role === 'super_admin' && <OperationsPanel initialSection="workers" admin={admin} />}
     {tab === 'tasks' && <OperationsPanel initialSection="tasks" admin={admin} />}
