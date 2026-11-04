@@ -663,8 +663,7 @@ export function assertResponsibleWorkerFieldsAllowed(role, payload) {
 
 /**
  * @param {string} role
- * @param {string} method
- * @param {string | null} [action=null]
+ * @param {unknown} pin
  */
 export function assertWorkerPinCreationAllowed(role, pin) {
   if (pin === undefined || pin === null || pin === '') return true;
@@ -677,6 +676,11 @@ export function assertWorkerPinCreationAllowed(role, pin) {
   return true;
 }
 
+/**
+ * @param {string} role
+ * @param {string} method
+ * @param {string | null} [action=null]
+ */
 export function assertWorkerManagementPermission(role, method, action = null) {
   if (role === 'super_admin') return true;
   if (action === 'pin') {
