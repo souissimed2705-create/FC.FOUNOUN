@@ -125,6 +125,18 @@ export const OperationsPanel: React.FC<Props> = ({ initialSection, admin }) => {
       setNotice('تم الحفظ بنجاح.');
       await refresh();
     } catch (e) {
+      if (fallback && (e instanceof TypeError || !navigator.onLine)) {
+        try {
+          const { queueMutation } = await import('../lib/operationsApi');
+          queueMutation(fallback.path, fallback.init);
+          setPending(queuedMutationCount());
+          setNotice('انقطع الاتصال أثناء الحفظ؛ حُفظت العملية على الهاتف وستتم مزامنتها عند عودة الاتصال.');
+          return;
+        } catch (queueError) {
+          setError(queueError instanceof Error ? queueError.message : 'تعذر حفظ العملية محلياً.');
+          return;
+        }
+      }
       setError(e instanceof Error ? e.message : 'فشلت العملية.');
     }
   };
