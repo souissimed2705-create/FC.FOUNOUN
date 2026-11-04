@@ -50,6 +50,12 @@ export interface DeleteModelResponse {
   message: string;
 }
 
+export interface ListModelsResponse {
+  success: boolean;
+  models: ShoeModel[];
+  nextPageToken: string | null;
+}
+
 export interface ApiErrorResponse {
   success: false;
   error: string;

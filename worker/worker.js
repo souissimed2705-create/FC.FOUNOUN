@@ -79,9 +79,9 @@ export default {
     const modelsPrefix = '/api/models';
 
     if (cleanPath === modelsPrefix) {
-      if (request.method !== 'POST') {
+      if (request.method !== 'GET' && request.method !== 'POST') {
         return jsonResponse(
-          { success: false, error: 'طريقة الطلب غير مدعومة لهذا المسار، استخدم POST لإنشاء موديل', code: 'method_not_allowed' },
+          { success: false, error: 'طريقة الطلب غير مدعومة لهذا المسار، استخدم GET للعرض أو POST لإنشاء موديل', code: 'method_not_allowed' },
           405,
           corsHeaders
         );
@@ -151,6 +151,10 @@ export default {
       await verifySuperAdminRole(callerUid, projectId, saAccessToken);
 
       // 5. Dispatch Route Handlers
+      if (request.method === 'GET') {
+        return await handleListModels(request, projectId, saAccessToken, corsHeaders);
+      }
+
       if (request.method === 'POST') {
         return await handleCreateModel(request, callerUid, projectId, saAccessToken, corsHeaders);
       }
@@ -177,6 +181,31 @@ export default {
 // ==========================================
 // ROUTE HANDLERS
 // ==========================================
+
+async function handleListModels(request, projectId, accessToken, corsHeaders) {
+  const url = new URL(request.url);
+  const requestedPageSize = Number(url.searchParams.get('pageSize') || '50');
+  const pageSize = Number.isInteger(requestedPageSize)
+    ? Math.min(Math.max(requestedPageSize, 1), 100)
+    : 50;
+  const search = (url.searchParams.get('q') || '').trim().toLocaleLowerCase();
+  const category = url.searchParams.get('category') || '';
+  const result = await listFirestoreDocs(projectId, accessToken, 'models', pageSize);
+  const models = result.documents
+    .map((document) => convertFromFirestoreFields(document.fields || {}))
+    .filter((model) => !category || model.category === category)
+    .filter((model) => !search || String(model.name || '').toLocaleLowerCase().includes(search));
+
+  return jsonResponse(
+    {
+      success: true,
+      models,
+      nextPageToken: result.nextPageToken || null,
+    },
+    200,
+    corsHeaders
+  );
+}
 
 async function handleCreateModel(request, callerUid, projectId, accessToken, corsHeaders) {
   const bodyText = await readStreamWithLimit(request.body, MAX_REQUEST_BODY_BYTES);
@@ -1166,6 +1195,22 @@ async function getFirestoreDoc(projectId, accessToken, path, transactionId) {
   if (resp.status === 404) return null;
   if (!resp.ok) throw createHttpError(`فشل قراءة الوثيقة ${path}`, 500, 'doc_read_failed');
   return await resp.json();
+}
+
+async function listFirestoreDocs(projectId, accessToken, collection, pageSize) {
+  const url = new URL(`${FIRESTORE_BASE_URL}/${projectId}/databases/(default)/documents/${collection}`);
+  url.searchParams.set('pageSize', String(pageSize));
+  const resp = await fetch(url, {
+    headers: { Authorization: `Bearer ${accessToken}` },
+  });
+  if (!resp.ok) {
+    throw createHttpError('فشل قراءة قائمة الموديلات من Firestore', 500, 'collection_read_failed');
+  }
+  const data = await resp.json();
+  return {
+    documents: Array.isArray(data.documents) ? data.documents : [],
+    nextPageToken: data.nextPageToken || null,
+  };
 }
 
 // Convert native JS object to Firestore REST API fields

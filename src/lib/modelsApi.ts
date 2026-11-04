@@ -13,6 +13,7 @@ import type {
   CreateModelResponse,
   UpdateModelResponse,
   DeleteModelResponse,
+  ListModelsResponse,
 } from '../types/models';
 
 const WORKER_BASE_URL =
@@ -29,6 +30,28 @@ export class ApiError extends Error {
     this.status = status;
     this.code = code;
   }
+}
+
+export async function listShoeModels(options: {
+  search?: string;
+  category?: CreateModelPayload['category'];
+  pageSize?: number;
+} = {}): Promise<ListModelsResponse> {
+  const token = await getAuthToken();
+  const params = new URLSearchParams();
+  if (options.search?.trim()) params.set('q', options.search.trim());
+  if (options.category) params.set('category', options.category);
+  if (options.pageSize) params.set('pageSize', String(options.pageSize));
+  const query = params.toString();
+  const response = await fetch(`${WORKER_BASE_URL}/api/models${query ? `?${query}` : ''}`, {
+    headers: { Authorization: `Bearer ${token}` },
+  });
+  const responseData = await response.json().catch(() => null);
+  if (!response.ok || !responseData?.success) {
+    const finalMsg = mapStatusToMessage(response.status, responseData?.error || responseData?.message);
+    throw new ApiError(finalMsg, response.status, responseData?.code);
+  }
+  return responseData as ListModelsResponse;
 }
 
 /**
