@@ -383,7 +383,9 @@ async function handleWorkerLogin(request, env, projectId, accessToken, corsHeade
     throw createHttpError('تم إيقاف محاولة الدخول مؤقتاً. حاول بعد 15 دقيقة.', 429, 'worker_login_locked');
   }
 
-  const suppliedHash = await computeWebCryptoSha256(`${pinRecord.pin_salt}:${pin}`);
+  const suppliedHash = pinRecord.pin_algo === 'pbkdf2-sha256-v1'
+    ? await computePinPbkdf2(pinRecord.pin_salt, pin)
+    : await computeWebCryptoSha256(`${pinRecord.pin_salt}:${pin}`);
   if (suppliedHash !== pinRecord.pin_hash) {
     const count = Number(attempts.count || 0) + 1;
     const lockedUntil = count >= 5 ? now + 15 * 60 * 1000 : 0;
@@ -435,7 +437,7 @@ async function handleWorkerTaskProgress(request, taskId, workerId, projectId, ac
   const task = convertFromFirestoreFields(taskDoc.fields || {});
   if (task.assignedWorkerId !== workerId) throw createHttpError('لا يمكنك تحديث مهمة غير مسندة إليك', 403, 'task_not_assigned');
   if (task.status === 'cancelled' || task.status === 'completed') throw createHttpError('هذه المهمة مغلقة', 409, 'task_closed');
-  return handleTaskProgress(request, taskId, workerId, projectId, accessToken, corsHeaders);
+  return handleTaskProgress(request, taskId, workerId, projectId, accessToken, corsHeaders, workerId);
 }
 
 async function handleSetWorkerPin(request, workerId, callerUid, projectId, accessToken, corsHeaders) {
@@ -446,13 +448,13 @@ async function handleSetWorkerPin(request, workerId, callerUid, projectId, acces
   const worker = await getFirestoreDoc(projectId, accessToken, `workers/${workerId}`);
   if (!worker) throw createHttpError('العامل المطلوب غير موجود', 404, 'worker_not_found');
   const salt = bytesToBase64Url(crypto.getRandomValues(new Uint8Array(16)));
-  const pinHash = await computeWebCryptoSha256(`${salt}:${payload.pin}`);
-  const pinRecord = { workerId, pin_hash: pinHash, pin_salt: salt, updatedBy: callerUid, updatedAt: new Date().toISOString() };
+  const pinHash = await computePinPbkdf2(salt, payload.pin);
+  const pinRecord = { workerId, pin_hash: pinHash, pin_salt: salt, pin_algo: 'pbkdf2-sha256-v1', updatedBy: callerUid, updatedAt: new Date().toISOString() };
   await commitFirestoreTransaction(projectId, accessToken, null, [{ update: { name: `projects/${projectId}/databases/(default)/documents/worker_pins/${workerId}`, fields: convertToFirestoreFields(pinRecord) } }]);
   return jsonResponse({ success: true, workerId, message: 'تم حفظ PIN بشكل hash فقط' }, 200, corsHeaders);
 }
 
-async function handleTaskProgress(request, taskId, callerUid, projectId, accessToken, corsHeaders) {
+async function handleTaskProgress(request, taskId, callerUid, projectId, accessToken, corsHeaders, expectedWorkerId = null) {
   const payload = await parseJsonBody(request);
   if (!payload || !Number.isSafeInteger(payload.quantity) || payload.quantity < 1 || payload.quantity > 1000000) {
     throw createHttpError('quantity يجب أن يكون عدداً صحيحاً موجباً', 400, 'invalid_quantity');
@@ -480,6 +482,9 @@ async function handleTaskProgress(request, taskId, callerUid, projectId, accessT
   const currentDoc = await getFirestoreDoc(projectId, accessToken, `tasks/${taskId}`);
   if (!currentDoc) throw createHttpError('المهمة المطلوبة غير موجودة', 404, 'task_not_found');
   const current = convertFromFirestoreFields(currentDoc.fields || {});
+  if (expectedWorkerId && current.assignedWorkerId !== expectedWorkerId) {
+    throw createHttpError('لا يمكنك تحديث مهمة غير مسندة إليك', 403, 'task_not_assigned');
+  }
   const targetQuantity = Number(current.targetQuantity || 0);
   const completedQuantity = Number(current.completedQuantity || 0) + payload.quantity;
   if (!Number.isSafeInteger(targetQuantity) || targetQuantity < 1 || completedQuantity > targetQuantity) {
@@ -916,6 +921,16 @@ export async function normalizeModelName(rawName) {
 
   const hash = await computeWebCryptoSha256(canonical);
   return { original, normalized: canonical, hash };
+}
+
+async function computePinPbkdf2(salt, pin) {
+  const material = await crypto.subtle.importKey('raw', new TextEncoder().encode(pin), 'PBKDF2', false, ['deriveBits']);
+  const bits = await crypto.subtle.deriveBits(
+    { name: 'PBKDF2', salt: new TextEncoder().encode(salt), iterations: 120000, hash: 'SHA-256' },
+    material,
+    256
+  );
+  return Array.from(new Uint8Array(bits)).map(byte => byte.toString(16).padStart(2, '0')).join('');
 }
 
 export async function computeWebCryptoSha256(str) {
