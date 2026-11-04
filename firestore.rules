@@ -53,6 +53,9 @@ service cloud.firestore {
     match /messages/{messageId} {
       allow read, write: if false;
     }
+    match /conversations/{conversationId} {
+      allow read, write: if false;
+    }
     match /machine_cycles/{reportId} {
       allow read, write: if false;
     }
