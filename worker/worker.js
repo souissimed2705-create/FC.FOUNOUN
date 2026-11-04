@@ -276,7 +276,7 @@ async function dispatchManagementRoute(request, route, callerUid, callerRole, pr
 
 const RESOURCE_FIELDS = {
   workers: ['name', 'phone', 'email', 'status', 'notes', 'machineNumber', 'shift'],
-  tasks: ['title', 'description', 'status', 'priority', 'assignedWorkerId', 'assignedWorkerName', 'modelId', 'modelName', 'modelCategory', 'targetQuantity', 'completedQuantity', 'dueDate'],
+  tasks: ['title', 'description', 'status', 'priority', 'assignedWorkerId', 'assignedWorkerName', 'machineNumber', 'shift', 'modelId', 'modelName', 'modelCategory', 'targetQuantity', 'completedQuantity', 'dueDate'],
 };
 
 function validateResourcePayload(payload, resource, isCreate) {
@@ -367,7 +367,8 @@ async function handleCreateResource(request, resource, callerUid, projectId, acc
     const modelDoc = await getFirestoreDoc(projectId, accessToken, `models/${payload.modelId}`);
     if (!modelDoc) throw createHttpError('المودال المحدد غير موجود في الكتالوج', 404, 'model_not_found');
     const model = convertFromFirestoreFields(modelDoc.fields || {});
-    taskDetails = { assignedWorkerName: assignedWorker.name, modelId: payload.modelId, modelName: model.name, modelCategory: model.category };
+    if (![1, 2, 3].includes(assignedWorker.machineNumber) || !['day', 'night'].includes(assignedWorker.shift)) throw createHttpError('حساب مشرف العمال غير مربوط بمكينة ووردية', 409, 'worker_machine_assignment_missing');
+    taskDetails = { assignedWorkerName: assignedWorker.name, machineNumber: assignedWorker.machineNumber, shift: assignedWorker.shift, modelId: payload.modelId, modelName: model.name, modelCategory: model.category };
   }
   const record = { id, ...defaults, ...payload, ...taskDetails, createdBy: callerUid, createdAt: now, updatedAt: now };
   const writes = [{ update: { name: `projects/${projectId}/databases/(default)/documents/${resource}/${id}`, fields: convertToFirestoreFields(record) }, currentDocument: { exists: false } }];
