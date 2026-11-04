@@ -32,6 +32,7 @@ import {
   assertTaskCreationFieldsAllowed,
   buildResourceCreationId,
   isSameResourceCreation,
+  resourceCreationFingerprint,
   assertTaskUpdateStatusAllowed,
   assertResponsibleWorkerFieldsAllowed,
   sanitizeWorkerOutputForRole,
@@ -451,17 +452,17 @@ export async function runAllTests() {
   assert(buildResourceCreationId('tasks', createMutationId) === 'tsk_123e4567e89b42d3a456426614174000',
     'تكوين معرّف ثابت لإنشاء أمر الإنتاج من معرّف العملية');
   assert(isSameResourceCreation(
-    { creationMutationId: createMutationId, createdBy: 'admin_1', name: 'عامل', machineNumber: 1, shift: 'day', status: 'active' },
+    { creationMutationId: createMutationId, creationFingerprint: resourceCreationFingerprint({ name: 'عامل', machineNumber: 1, shift: 'day' }, 'workers'), createdBy: 'admin_1', name: 'عامل', machineNumber: 1, shift: 'day', status: 'inactive' },
     { name: 'عامل', machineNumber: 1, shift: 'day' },
     'workers', createMutationId, 'admin_1'
   ), 'اعتبار إعادة طلب إنشاء العامل نفسه من الحساب نفسه عملية مكررة آمنة');
   assert(!isSameResourceCreation(
-    { creationMutationId: createMutationId, createdBy: 'admin_1', name: 'عامل آخر', machineNumber: 1, shift: 'day', status: 'active' },
+    { creationMutationId: createMutationId, creationFingerprint: resourceCreationFingerprint({ name: 'عامل آخر', machineNumber: 1, shift: 'day' }, 'workers'), createdBy: 'admin_1', name: 'عامل آخر', machineNumber: 1, shift: 'day', status: 'active' },
     { name: 'عامل', machineNumber: 1, shift: 'day' },
     'workers', createMutationId, 'admin_1'
   ), 'رفض إعادة استخدام معرّف الإنشاء لمحتوى مختلف');
   assert(!isSameResourceCreation(
-    { creationMutationId: createMutationId, createdBy: 'admin_1', name: 'عامل', machineNumber: 1, shift: 'day', status: 'active' },
+    { creationMutationId: createMutationId, creationFingerprint: resourceCreationFingerprint({ name: 'عامل', machineNumber: 1, shift: 'day' }, 'workers'), createdBy: 'admin_1', name: 'عامل', machineNumber: 1, shift: 'day', status: 'active' },
     { name: 'عامل', machineNumber: 1, shift: 'day' },
     'workers', createMutationId, 'admin_2'
   ), 'رفض إعادة استخدام معرّف إنشاء تابع لحساب آخر');
