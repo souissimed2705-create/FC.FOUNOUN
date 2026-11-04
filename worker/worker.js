@@ -549,6 +549,26 @@ export function assertManagementAccountUpdateAllowed(current, changes, accounts,
   return true;
 }
 
+/** Build an optimistic-concurrency reservation write for one responsible shift. */
+export function buildResponsibleShiftReservationWrite(projectId, uid, shift, slotDoc, active) {
+  if (!['day', 'night'].includes(shift)) throw createHttpError('الوردية غير صالحة', 400, 'invalid_responsible_shift');
+  const existing = slotDoc ? convertFromFirestoreFields(slotDoc.fields || {}) : null;
+  if (!active) {
+    if (!existing || existing.uid !== uid || existing.status !== 'active') return null;
+  } else if (existing && existing.status === 'active' && existing.uid !== uid) {
+    throw createHttpError('هذه الوردية محجوزة لمسؤول آخر', 409, 'responsible_shift_taken');
+  }
+  const record = { uid, shift, status: active ? 'active' : 'inactive', updatedAt: new Date().toISOString() };
+  const write = {
+    update: {
+      name: `projects/${projectId}/databases/(default)/documents/management_responsible_slots/${shift}`,
+      fields: convertToFirestoreFields(record)
+    }
+  };
+  write.currentDocument = slotDoc?.updateTime ? { updateTime: slotDoc.updateTime } : { exists: false };
+  return write;
+}
+
 export function buildWorkerFreezeUpdate(current, timestamp) {
   return { ...current, status: 'inactive', frozenAt: timestamp, updatedAt: timestamp };
 }
@@ -605,6 +625,11 @@ async function handleCreateManagementAccount(request, callerUid, projectId, acce
     if (activeAccounts.some(user => user.shift === shift)) throw createHttpError('يوجد بالفعل حساب مسؤول مخصص لهذه الوردية', 409, 'responsible_shift_taken');
   }
   const uid = `mgr_${crypto.randomUUID().replace(/-/g, '')}`;
+  const reservationWrites = [];
+  if (role === 'responsible') {
+    const slotDoc = await getFirestoreDoc(projectId, accessToken, `management_responsible_slots/${shift}`);
+    reservationWrites.push(buildResponsibleShiftReservationWrite(projectId, uid, shift, slotDoc, true));
+  }
   const now = new Date().toISOString();
   const user = { uid, displayName: name, name, email: '', role, status: 'active', ...(role === 'responsible' ? { shift } : {}), createdBy: callerUid, createdAt: now, updatedAt: now };
   const salt = bytesToBase64Url(crypto.getRandomValues(new Uint8Array(16)));
@@ -612,7 +637,8 @@ async function handleCreateManagementAccount(request, callerUid, projectId, acce
   const codeRecord = { uid, pin_hash: pinHash, pin_salt: salt, pin_algo: 'pbkdf2-sha256-v1', updatedBy: callerUid, updatedAt: now };
   await commitFirestoreTransaction(projectId, accessToken, null, [
     { update: { name: `projects/${projectId}/databases/(default)/documents/users/${uid}`, fields: convertToFirestoreFields(user) }, currentDocument: { exists: false } },
-    { update: { name: `projects/${projectId}/databases/(default)/documents/management_codes/${uid}`, fields: convertToFirestoreFields(codeRecord) }, currentDocument: { exists: false } }
+    { update: { name: `projects/${projectId}/databases/(default)/documents/management_codes/${uid}`, fields: convertToFirestoreFields(codeRecord) }, currentDocument: { exists: false } },
+    ...reservationWrites
   ]);
   return jsonResponse({ success: true, data: { uid, displayName: name, role, status: 'active', shift: shift || null } }, 201, corsHeaders);
 }
@@ -666,7 +692,21 @@ async function handleUpdateManagementAccount(request, uid, callerUid, projectId,
     .map(item => ({ ...convertFromFirestoreFields(item.fields || {}), uid: item.name?.split('/').pop() }));
   assertManagementAccountUpdateAllowed(current, changes, allAccounts, uid, callerUid);
   const record = { ...current, ...changes, updatedBy: callerUid, updatedAt: new Date().toISOString() };
-  await commitFirestoreTransaction(projectId, accessToken, null, [{ update: { name: `projects/${projectId}/databases/(default)/documents/users/${uid}`, fields: convertToFirestoreFields(record) }, currentDocument: { updateTime: doc.updateTime } }]);
+  const writes = [{ update: { name: `projects/${projectId}/databases/(default)/documents/users/${uid}`, fields: convertToFirestoreFields(record) }, currentDocument: { updateTime: doc.updateTime } }];
+  if (current.role === 'responsible') {
+    const nextShift = record.shift || current.shift;
+    const nextActive = record.status === 'active';
+    const oldSlot = current.shift ? await getFirestoreDoc(projectId, accessToken, `management_responsible_slots/${current.shift}`) : null;
+    if (nextActive) {
+      const nextSlot = nextShift === current.shift ? oldSlot : await getFirestoreDoc(projectId, accessToken, `management_responsible_slots/${nextShift}`);
+      writes.push(buildResponsibleShiftReservationWrite(projectId, uid, nextShift, nextSlot, true));
+    }
+    if (oldSlot && current.shift && (!nextActive || nextShift !== current.shift)) {
+      const release = buildResponsibleShiftReservationWrite(projectId, uid, current.shift, oldSlot, false);
+      if (release) writes.push(release);
+    }
+  }
+  await commitFirestoreTransaction(projectId, accessToken, null, writes);
   return jsonResponse({ success: true, data: { uid, displayName: record.displayName, role: record.role, status: record.status, shift: record.shift || null } }, 200, corsHeaders);
 }
 
@@ -678,7 +718,13 @@ async function handleFreezeManagementAccount(uid, callerUid, projectId, accessTo
   assertManagementAccountUpdateAllowed(current, { status: 'inactive' }, [], uid, callerUid);
   const now = new Date().toISOString();
   const record = { ...current, status: 'inactive', frozenAt: now, updatedAt: now, updatedBy: callerUid };
-  await commitFirestoreTransaction(projectId, accessToken, null, [{ update: { name: `projects/${projectId}/databases/(default)/documents/users/${uid}`, fields: convertToFirestoreFields(record) }, currentDocument: { updateTime: doc.updateTime } }]);
+  const writes = [{ update: { name: `projects/${projectId}/databases/(default)/documents/users/${uid}`, fields: convertToFirestoreFields(record) }, currentDocument: { updateTime: doc.updateTime } }];
+  if (current.role === 'responsible' && current.shift) {
+    const slotDoc = await getFirestoreDoc(projectId, accessToken, `management_responsible_slots/${current.shift}`);
+    const release = buildResponsibleShiftReservationWrite(projectId, uid, current.shift, slotDoc, false);
+    if (release) writes.push(release);
+  }
+  await commitFirestoreTransaction(projectId, accessToken, null, writes);
   return jsonResponse({ success: true, data: { uid, status: 'inactive', frozen: true } }, 200, corsHeaders);
 }
 
