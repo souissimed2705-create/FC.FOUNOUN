@@ -1,10 +1,11 @@
 import React, { useCallback, useEffect, useState } from 'react';
 import { signOut } from 'firebase/auth';
-import { Home, ClipboardList, LogOut, MessageCircle, Send, RefreshCw, Gauge } from 'lucide-react';
+import { Home, ClipboardList, LogOut, MessageCircle, RefreshCw, Gauge } from 'lucide-react';
 import { auth } from '../lib/firebase';
-import { listMyConversation, listMyTasks, recordMyProgress, sendWorkerMessage, updateMyTaskStatus, listMyMachineCycles, submitMachineCycle, queueMutation, flushQueuedMutations, queuedMutationCount } from '../lib/operationsApi';
+import { listMyTasks, recordMyProgress, updateMyTaskStatus, listMyMachineCycles, submitMachineCycle, queueMutation, flushQueuedMutations, queuedMutationCount } from '../lib/operationsApi';
+import { PrivateMessagesPanel } from './PrivateMessagesPanel';
 import { optimizeAndEncodeImage } from '../utils/imageOptimizer';
-import type { ChatMessage, TaskRecord, MachineCycleRecord } from '../types/operations';
+import type { TaskRecord, MachineCycleRecord } from '../types/operations';
 
 interface Props { worker: { id: string; name: string }; }
 type Page = 'home' | 'tasks' | 'messages' | 'cycles';
@@ -12,13 +13,11 @@ type Page = 'home' | 'tasks' | 'messages' | 'cycles';
 export const WorkerDashboard: React.FC<Props> = ({ worker }) => {
   const [page, setPage] = useState<Page>('home');
   const [tasks, setTasks] = useState<TaskRecord[]>([]);
-  const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [cycles, setCycles] = useState<MachineCycleRecord[]>([]);
   const [cycleCount, setCycleCount] = useState('');
   const [cyclePhoto, setCyclePhoto] = useState('');
   const [cyclePhotoName, setCyclePhotoName] = useState('');
   const [quantities, setQuantities] = useState<Record<string, string>>({});
-  const [draft, setDraft] = useState('');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
   const [notice, setNotice] = useState('');
@@ -31,10 +30,6 @@ export const WorkerDashboard: React.FC<Props> = ({ worker }) => {
     try { const response = await listMyMachineCycles(); setCycles(response.data || []); }
     catch (err) { setError(err instanceof Error ? err.message : 'تعذر تحميل تقارير الدورات.'); }
   }, []);
-  const refreshMessages = useCallback(async () => {
-    try { const response = await listMyConversation(); setMessages(response.data || []); }
-    catch (err) { setError(err instanceof Error ? err.message : 'تعذر تحميل المحادثة.'); }
-  }, []);
   useEffect(() => { void refresh(); void refreshCycles(); }, [refresh, refreshCycles]);
   useEffect(() => {
     const onOnline = async () => {
@@ -46,12 +41,7 @@ export const WorkerDashboard: React.FC<Props> = ({ worker }) => {
     window.addEventListener('online', onOnline);
     return () => window.removeEventListener('online', onOnline);
   }, [refresh, refreshCycles]);
-  useEffect(() => {
-    if (page !== 'messages') return;
-    void refreshMessages();
-    const timer = window.setInterval(() => void refreshMessages(), 7000);
-    return () => window.clearInterval(timer);
-  }, [page, refreshMessages]);
+
 
   const saveCycle = async (event: React.FormEvent) => {
     event.preventDefault();
@@ -96,14 +86,7 @@ export const WorkerDashboard: React.FC<Props> = ({ worker }) => {
   const statusLabel = (status: TaskRecord['status']) => ({
     open: 'جديدة', in_progress: 'قيد التنفيذ', pending: 'معلّقة', completed: 'مكتملة', cancelled: 'ملغاة'
   }[status]);
-  const sendMessage = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!draft.trim()) return;
-    setBusy(true); setError(''); setNotice('');
-    try { await sendWorkerMessage(draft.trim()); setDraft(''); await refreshMessages(); }
-    catch (err) { setError(err instanceof Error ? err.message : 'تعذر إرسال الرسالة.'); }
-    finally { setBusy(false); }
-  };
+
 
   return <section dir="rtl" className="w-full max-w-3xl space-y-4">
     <header className="flex items-center justify-between gap-3 rounded-2xl border border-[#D4AF37]/35 bg-gradient-to-l from-[#211B0B] to-[#111] p-4">
@@ -153,13 +136,6 @@ export const WorkerDashboard: React.FC<Props> = ({ worker }) => {
       </div>
     </div>}
 
-    {page === 'messages' && <div className="rounded-2xl border border-white/10 bg-[#111] p-4 space-y-3">
-      <div className="flex items-center gap-2"><MessageCircle className="w-5 h-5 text-[#D4AF37]" /><h3 className="font-bold text-[#F5D77F]">المحادثة مع المسؤول</h3></div>
-      <div className="max-h-72 min-h-36 overflow-y-auto rounded-xl border border-white/10 bg-[#080808] p-3 space-y-2">
-        {!messages.length && <p className="py-8 text-center text-sm text-gray-500">لا توجد رسائل بعد.</p>}
-        {messages.map(msg => <div key={msg.id} className={'max-w-[88%] rounded-xl p-3 ' + (msg.senderRole === 'worker' ? 'ml-auto bg-white/10' : 'mr-auto bg-[#3A2E12]')}><div className="mb-1 text-[11px] text-[#F5D77F]">{msg.senderName} · {new Date(msg.createdAt).toLocaleString('ar-TN')}</div><p className="break-words whitespace-pre-wrap text-sm">{msg.text}</p></div>)}
-      </div>
-      <form onSubmit={sendMessage} className="flex gap-2"><input className="field min-w-0 flex-1" placeholder="اكتب رسالة للمسؤول..." value={draft} onChange={e => setDraft(e.target.value)} disabled={busy} /><button className="gold-button" disabled={busy || !draft.trim()}><Send className="h-4 w-4" /> إرسال</button></form>
-    </div>}
+    {page === 'messages' && <PrivateMessagesPanel />}
   </section>;
 };
