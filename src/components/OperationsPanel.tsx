@@ -22,6 +22,7 @@ export const OperationsPanel: React.FC<Props> = ({ initialSection, admin }) => {
   const [models, setModels] = useState<ShoeModel[]>([]);
   const [name, setName] = useState('');
   const [phone, setPhone] = useState('');
+  const [newWorkerPin, setNewWorkerPin] = useState('');
   const [machineNumber, setMachineNumber] = useState<'1' | '2' | '3'>('1');
   const [shift, setShift] = useState<'day' | 'night'>('day');
   const [cycles, setCycles] = useState<MachineCycleRecord[]>([]);
@@ -149,9 +150,12 @@ export const OperationsPanel: React.FC<Props> = ({ initialSection, admin }) => {
   const addWorker = (e: React.FormEvent) => {
     e.preventDefault();
     if (!name.trim()) { setError('اسم العامل مطلوب.'); return; }
-    const payload = { name: name.trim(), ...(!isResponsible ? { phone: phone.trim() } : {}), machineNumber: Number(machineNumber) as 1 | 2 | 3, shift, clientMutationId: crypto.randomUUID() };
-    void runMutation(() => createWorker(payload), { path: '/api/workers', init: { method: 'POST', body: JSON.stringify(payload) } });
-    setName(''); setPhone('');
+    if (isSupervisor && !/^\\d{6}$/.test(newWorkerPin)) { setError('عيّن للعامل PIN من 6 أرقام قبل إنشاء الحساب.'); return; }
+    if (isSupervisor && !navigator.onLine) { setError('إنشاء العامل مع تعيين PIN يتطلب اتصالاً بالإنترنت لحماية الرمز السري وعدم حفظه مكشوفاً على الهاتف.'); return; }
+    const payload = { name: name.trim(), ...(!isResponsible ? { phone: phone.trim() } : {}), machineNumber: Number(machineNumber) as 1 | 2 | 3, shift, ...(isSupervisor ? { pin: newWorkerPin } : {}), clientMutationId: crypto.randomUUID() };
+    const fallback = !isSupervisor ? { path: '/api/workers', init: { method: 'POST' as const, body: JSON.stringify(payload) } } : undefined;
+    void runMutation(() => createWorker(payload), fallback);
+    setName(''); setPhone(''); setNewWorkerPin('');
   };
 
   const addTask = (e: React.FormEvent) => {
@@ -215,11 +219,12 @@ export const OperationsPanel: React.FC<Props> = ({ initialSection, admin }) => {
     {section === 'workers' && canManageWorkers && <div className="space-y-4">
       <h3 className="font-bold text-[#F5D77F]">إدارة العمال ورموز الدخول</h3>
       <form onSubmit={addWorker} className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-        <input className="field" placeholder="اسم العامل" value={name} onChange={e => setName(e.target.value)} />
-        {!isResponsible && <input className="field" placeholder="الهاتف (اختياري)" value={phone} onChange={e => setPhone(e.target.value)} />}
-        <select className="field" value={machineNumber} onChange={e => setMachineNumber(e.target.value as '1' | '2' | '3')}><option value="1">المكينة 1</option><option value="2">المكينة 2</option><option value="3">المكينة 3</option></select>
-        <select className="field" value={shift} onChange={e => setShift(e.target.value as 'day' | 'night')}><option value="day">الوردية النهارية</option><option value="night">الوردية الليلية</option></select>
-        <button className="gold-button sm:col-span-2">إضافة مشرف عمال</button>
+        <label className="block text-xs text-gray-300">اسم مشرف العمال<input className="field mt-1 w-full" placeholder="اكتب اسم العامل" value={name} onChange={e => setName(e.target.value)} /></label>
+        {!isResponsible && <label className="block text-xs text-gray-300">رقم الهاتف (اختياري)<input className="field mt-1 w-full" placeholder="رقم الهاتف" value={phone} onChange={e => setPhone(e.target.value)} /></label>}
+        <label className="block text-xs text-gray-300">تعيين المكينة<select className="field mt-1 w-full" value={machineNumber} onChange={e => setMachineNumber(e.target.value as '1' | '2' | '3')}><option value="1">المكينة 1</option><option value="2">المكينة 2</option><option value="3">المكينة 3</option></select></label>
+        <label className="block text-xs text-gray-300">تعيين الوردية<select className="field mt-1 w-full" value={shift} onChange={e => setShift(e.target.value as 'day' | 'night')}><option value="day">الوردية النهارية</option><option value="night">الوردية الليلية</option></select></label>
+        {isSupervisor && <label className="block text-xs text-[#F5D77F] sm:col-span-2">رمز دخول العامل PIN (6 أرقام)<input className="field mt-1 w-full text-center tracking-[0.35em]" type="password" inputMode="numeric" autoComplete="new-password" maxLength={6} placeholder="عيّن رمز الدخول السري" value={newWorkerPin} onChange={e => setNewWorkerPin(e.target.value.replace(/\\D/g, '').slice(0, 6))} /><span className="mt-1 block text-[11px] text-gray-500">المشرف العام وحده يعيّن الرمز. لا يُحفظ الرمز كنص مكشوف.</span></label>}
+        <button className="gold-button sm:col-span-2">إضافة مشرف عمال وحفظ بيانات الدخول</button>
       </form>
       <div className="space-y-2">{workers.map(w => <div key={w.id} className="flex flex-wrap items-center gap-2 rounded-xl border border-white/10 bg-[#0A0A0A] p-3">
         <input className="field min-w-0 flex-1" aria-label="اسم العامل" value={workerEdits[w.id]?.name ?? w.name} onChange={e => setWorkerEdits(current => ({ ...current, [w.id]: { name: e.target.value, phone: current[w.id]?.phone ?? w.phone ?? '', machineNumber: current[w.id]?.machineNumber ?? String(w.machineNumber || ''), shift: current[w.id]?.shift ?? w.shift ?? 'day' } }))} />
