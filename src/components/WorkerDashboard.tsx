@@ -80,7 +80,20 @@ export const WorkerDashboard: React.FC<Props> = ({ worker }) => {
     setBusy(true); setError(''); setNotice('');
     const recordedAt = new Date().toISOString();
     try { if (!navigator.onLine) { queueMutation('/api/worker/cycles', { method: 'POST', body: JSON.stringify({ count, photo: cyclePhoto, recordedAt }) }); setPendingSync(queuedMutationCount()); setNotice('لا يوجد اتصال؛ حُفظ تقرير الدورات وصورة العداد ووقت التسجيل على الهاتف وسيتزامن عند عودة الاتصال.'); } else { await submitMachineCycle(count, cyclePhoto, recordedAt); setNotice('تم حفظ تقرير الدورات وصورة العداد مع التاريخ والوقت تلقائياً.'); await refreshCycles(); } setCycleCount(''); setCyclePhoto(''); setCyclePhotoName(''); }
-    catch (err) { setError(err instanceof Error ? err.message : 'تعذر حفظ تقرير الدورات.'); }
+    catch (err) {
+      if (err instanceof TypeError) {
+        try {
+          queueMutation('/api/worker/cycles', { method: 'POST', body: JSON.stringify({ count, photo: cyclePhoto, recordedAt }) });
+          setPendingSync(queuedMutationCount());
+          setNotice('انقطع الاتصال أثناء الإرسال؛ حُفظ التقرير وصورة العداد ووقت التسجيل على الهاتف وسيتزامن تلقائياً.');
+          setCycleCount(''); setCyclePhoto(''); setCyclePhotoName('');
+        } catch (queueError) {
+          setError(queueError instanceof Error ? queueError.message : 'تعذر حفظ التقرير محلياً.');
+        }
+      } else {
+        setError(err instanceof Error ? err.message : 'تعذر حفظ تقرير الدورات.');
+      }
+    }
     finally { setBusy(false); }
   };
   const submitProgress = async (task: TaskRecord) => {
