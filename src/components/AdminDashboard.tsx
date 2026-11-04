@@ -10,10 +10,10 @@ type Page = 'home' | 'models' | 'tasks' | 'supervisor' | 'workers';
 export const AdminDashboard: React.FC<AdminDashboardProps> = ({ admin, onLogout, isLoggingOut }) => {
   const [page, setPage] = useState<Page>('home');
   const isSupervisor = admin.role === 'super_admin';
-  const roleName = isSupervisor ? 'المشرف' : 'المسؤول';
+  const roleName = isSupervisor ? 'المشرف العام' : admin.role === 'responsible' ? 'المسؤول' : 'المدير العام';
   const greeting = isSupervisor
     ? 'أهلاً بك. أشرف على العمال ورموز الدخول وتابع سير الإنتاج.'
-    : 'أهلاً بك. أصدر أوامر الإنتاج وتابع تنفيذها وتواصل مع العمال.';
+    : admin.role === 'responsible' ? 'أهلاً بك. أنشئ أوامر الإنتاج وتابع تقارير دورات المكائن وتواصل مع مشرفي العمال.' : 'أهلاً بك. أشرف على سير الإنتاج وأدر العمليات المسموح بها.';
 
   const go = (next: Page) => setPage(next);
   const backHome = () => setPage('home');
