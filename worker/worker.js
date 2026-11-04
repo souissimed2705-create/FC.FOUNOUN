@@ -499,9 +499,6 @@ async function handleUpdateResource(request, resource, id, callerUid, projectId,
     }
   }
 
-  const allAccounts = (await listFirestoreDocs(projectId, accessToken, 'users', 100)).documents
-    .map(item => ({ ...convertFromFirestoreFields(item.fields || {}), uid: item.name?.split('/').pop() }));
-  assertManagementAccountUpdateAllowed(current, changes, allAccounts, uid, callerUid);
   const record = { ...current, ...changes, updatedBy: callerUid, updatedAt: new Date().toISOString() };
   const write = { update: { name: `projects/${projectId}/databases/(default)/documents/${resource}/${id}`, fields: convertToFirestoreFields(record) }, currentDocument: { updateTime: currentDoc.updateTime } };
   await commitFirestoreTransaction(projectId, accessToken, null, [write]);
@@ -664,6 +661,9 @@ async function handleUpdateManagementAccount(request, uid, callerUid, projectId,
     if (!['active', 'inactive'].includes(payload.status)) throw createHttpError('حالة الحساب غير صالحة', 400, 'invalid_management_status');
     changes.status = payload.status;
   }
+  const allAccounts = (await listFirestoreDocs(projectId, accessToken, 'users', 100)).documents
+    .map(item => ({ ...convertFromFirestoreFields(item.fields || {}), uid: item.name?.split('/').pop() }));
+  assertManagementAccountUpdateAllowed(current, changes, allAccounts, uid, callerUid);
   const record = { ...current, ...changes, updatedBy: callerUid, updatedAt: new Date().toISOString() };
   await commitFirestoreTransaction(projectId, accessToken, null, [{ update: { name: `projects/${projectId}/databases/(default)/documents/users/${uid}`, fields: convertToFirestoreFields(record) }, currentDocument: { updateTime: doc.updateTime } }]);
   return jsonResponse({ success: true, data: { uid, displayName: record.displayName, role: record.role, status: record.status, shift: record.shift || null } }, 200, corsHeaders);
