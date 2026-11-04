@@ -74,6 +74,9 @@ export default {
     const managementRoute = parseManagementRoute(cleanPath, request.method);
     const workerLoginRoute = cleanPath === '/api/worker-auth/login' && request.method === 'POST';
     const managementLoginRoute = cleanPath === '/api/management-auth/login' && request.method === 'POST';
+    const managementAccountsRoute = cleanPath === '/api/management-accounts' && ['GET', 'POST'].includes(request.method);
+    const managementAccountMatch = cleanPath.match(/^\/api\/management-accounts\/([^/]+)(?:\/(code))?$/);
+    const managementAccountActionRoute = managementAccountMatch && ((managementAccountMatch[2] && request.method === 'PUT') || (!managementAccountMatch[2] && ['PUT', 'DELETE'].includes(request.method)));
     const workerTasksRoute = cleanPath === '/api/worker/tasks' && request.method === 'GET';
     const workerProgressMatch = cleanPath.match(/^\/api\/worker\/tasks\/([^/]+)\/progress$/);
     const workerProgressRoute = workerProgressMatch && request.method === 'POST';
@@ -88,14 +91,14 @@ export default {
     if (managementRoute?.error) {
       return jsonResponse({ success: false, error: managementRoute.error.message, code: managementRoute.error.code }, 400, corsHeaders);
     }
-    if (!managementRoute && !workerLoginRoute && !managementLoginRoute && !workerTasksRoute && !workerProgressRoute && !workerTaskStatusRoute && !workerMessagesRoute && !workerCyclesRoute && !managementCyclesRoute && !managementCyclePhotoRoute && !adminMessagesRoute && !cleanPath.startsWith('/api/models')) {
+    if (!managementRoute && !workerLoginRoute && !managementLoginRoute && !managementAccountsRoute && !managementAccountActionRoute && !workerTasksRoute && !workerProgressRoute && !workerTaskStatusRoute && !workerMessagesRoute && !workerCyclesRoute && !managementCyclesRoute && !managementCyclePhotoRoute && !adminMessagesRoute && !cleanPath.startsWith('/api/models')) {
       return jsonResponse({ success: false, error: 'المسار المطلوب غير موجود', code: 'not_found' }, 404, corsHeaders);
     }
 
     let modelIdParam = null;
     const modelsPrefix = '/api/models';
 
-    if (managementRoute || workerLoginRoute || managementLoginRoute || workerTasksRoute || workerProgressRoute || workerTaskStatusRoute || workerMessagesRoute || workerCyclesRoute || managementCyclesRoute || managementCyclePhotoRoute || adminMessagesRoute) {
+    if (managementRoute || workerLoginRoute || managementLoginRoute || managementAccountsRoute || managementAccountActionRoute || workerTasksRoute || workerProgressRoute || workerTaskStatusRoute || workerMessagesRoute || workerCyclesRoute || managementCyclesRoute || managementCyclePhotoRoute || adminMessagesRoute) {
       // Validated API routes are dispatched after authentication.
     } else if (cleanPath === modelsPrefix) {
       if (request.method !== 'GET' && request.method !== 'POST') {
@@ -189,6 +192,16 @@ export default {
       const callerRole = await verifyManagementRole(callerUid, projectId, saAccessToken);
       if (managementRoute?.resource === 'workers') {
         assertWorkerManagementPermission(callerRole, request.method, managementRoute.action);
+      }
+      if (managementAccountsRoute || managementAccountActionRoute) {
+        if (callerRole !== 'super_admin') throw createHttpError('إدارة حسابات المديرين والمسؤولين من صلاحيات المشرف العام فقط', 403, 'super_admin_only_management_accounts');
+        if (managementAccountsRoute && request.method === 'GET') return await handleListManagementAccounts(projectId, saAccessToken, corsHeaders);
+        if (managementAccountsRoute && request.method === 'POST') return await handleCreateManagementAccount(request, callerUid, projectId, saAccessToken, corsHeaders);
+        const accountId = safeDecodeUriSegment(managementAccountMatch[1]);
+        if (!/^mgr_[a-f0-9]{32}$/.test(accountId)) throw createHttpError('معرّف الحساب غير صالح', 400, 'invalid_management_account_id');
+        if (managementAccountMatch[2] === 'code') return await handleSetManagementCode(request, accountId, callerUid, projectId, saAccessToken, corsHeaders);
+        if (request.method === 'DELETE') return await handleFreezeManagementAccount(accountId, callerUid, projectId, saAccessToken, corsHeaders);
+        return await handleUpdateManagementAccount(request, accountId, callerUid, projectId, saAccessToken, corsHeaders);
       }
       if (adminMessagesRoute) return await handleManagementMessages(request, callerUid, callerRole, projectId, saAccessToken, corsHeaders);
       if (managementCyclesRoute) return await handleListCycles(request, projectId, saAccessToken, corsHeaders);
@@ -499,6 +512,108 @@ async function handleDeleteResource(id, resource, projectId, accessToken, corsHe
   throw createHttpError('الحذف الدائم غير مسموح لهذا المورد', 405, 'permanent_delete_forbidden');
 }
 
+
+
+async function handleListManagementAccounts(projectId, accessToken, corsHeaders) {
+  const result = await listFirestoreDocs(projectId, accessToken, 'users', 100);
+  const accounts = result.documents.map(doc => convertFromFirestoreFields(doc.fields || {}))
+    .filter(user => ['admin', 'responsible'].includes(user.role))
+    .map(user => ({ uid: user.uid || user.id, displayName: user.displayName || user.name || '', role: user.role, status: user.status, shift: user.shift || null, createdAt: user.createdAt || null }));
+  return jsonResponse({ success: true, data: accounts }, 200, corsHeaders);
+}
+
+async function handleCreateManagementAccount(request, callerUid, projectId, accessToken, corsHeaders) {
+  const payload = await parseJsonBody(request);
+  const name = typeof payload?.name === 'string' ? payload.name.trim() : '';
+  const role = payload?.role;
+  const code = typeof payload?.code === 'string' ? payload.code : '';
+  const shift = payload?.shift;
+  if (!name || name.length > 80 || !['admin', 'responsible'].includes(role) || !/^\d{6}$/.test(code)) {
+    throw createHttpError('أدخل الاسم ونوع الحساب والكود السري المكوّن من 6 أرقام', 400, 'invalid_management_account');
+  }
+  if (role === 'responsible' && !['day', 'night'].includes(shift)) throw createHttpError('يجب تحديد وردية المسؤول: نهار أو ليل', 400, 'responsible_shift_required');
+  if (role === 'admin' && shift !== undefined) throw createHttpError('حساب المدير العام لا يحتاج إلى وردية', 400, 'unexpected_shift');
+  const result = await listFirestoreDocs(projectId, accessToken, 'users', 100);
+  const accounts = result.documents.map(doc => convertFromFirestoreFields(doc.fields || {})).filter(user => user.role === role);
+  if (accounts.some(user => String(user.displayName || user.name || '').trim().toLocaleLowerCase() === name.toLocaleLowerCase())) {
+    throw createHttpError('يوجد حساب من النوع نفسه بهذا الاسم بالفعل', 409, 'management_name_taken');
+  }
+  if (role === 'responsible') {
+    if (accounts.length >= 2) throw createHttpError('تم إنشاء حسابَي المسؤول بالفعل؛ واحد للنهار وآخر لليل', 409, 'responsible_accounts_limit');
+    if (accounts.some(user => user.shift === shift)) throw createHttpError('يوجد بالفعل حساب مسؤول مخصص لهذه الوردية', 409, 'responsible_shift_taken');
+  }
+  const uid = `mgr_${crypto.randomUUID().replace(/-/g, '')}`;
+  const now = new Date().toISOString();
+  const user = { uid, displayName: name, name, email: '', role, status: 'active', ...(role === 'responsible' ? { shift } : {}), createdBy: callerUid, createdAt: now, updatedAt: now };
+  const salt = bytesToBase64Url(crypto.getRandomValues(new Uint8Array(16)));
+  const pinHash = await computePinPbkdf2(salt, code);
+  const codeRecord = { uid, pin_hash: pinHash, pin_salt: salt, pin_algo: 'pbkdf2-sha256-v1', updatedBy: callerUid, updatedAt: now };
+  await commitFirestoreTransaction(projectId, accessToken, null, [
+    { update: { name: `projects/${projectId}/databases/(default)/documents/users/${uid}`, fields: convertToFirestoreFields(user) }, currentDocument: { exists: false } },
+    { update: { name: `projects/${projectId}/databases/(default)/documents/management_codes/${uid}`, fields: convertToFirestoreFields(codeRecord) }, currentDocument: { exists: false } }
+  ]);
+  return jsonResponse({ success: true, data: { uid, displayName: name, role, status: 'active', shift: shift || null } }, 201, corsHeaders);
+}
+
+async function handleSetManagementCode(request, uid, callerUid, projectId, accessToken, corsHeaders) {
+  const payload = await parseJsonBody(request);
+  if (!payload || typeof payload.code !== 'string' || !/^\d{6}$/.test(payload.code)) throw createHttpError('الكود السري يجب أن يتكون من 6 أرقام', 400, 'invalid_management_code');
+  const userDoc = await getFirestoreDoc(projectId, accessToken, `users/${uid}`);
+  if (!userDoc) throw createHttpError('الحساب غير موجود', 404, 'management_account_not_found');
+  const user = convertFromFirestoreFields(userDoc.fields || {});
+  if (!['admin', 'responsible'].includes(user.role)) throw createHttpError('نوع الحساب غير مدعوم', 400, 'invalid_management_role');
+  const salt = bytesToBase64Url(crypto.getRandomValues(new Uint8Array(16)));
+  const pinHash = await computePinPbkdf2(salt, payload.code);
+  const path = `management_codes/${uid}`;
+  const old = await getFirestoreDoc(projectId, accessToken, path);
+  const record = { uid, pin_hash: pinHash, pin_salt: salt, pin_algo: 'pbkdf2-sha256-v1', updatedBy: callerUid, updatedAt: new Date().toISOString() };
+  const write = { update: { name: `projects/${projectId}/databases/(default)/documents/${path}`, fields: convertToFirestoreFields(record) } };
+  write.currentDocument = old?.updateTime ? { updateTime: old.updateTime } : { exists: false };
+  await commitFirestoreTransaction(projectId, accessToken, null, [write]);
+  return jsonResponse({ success: true, uid, message: 'تم تحديث الكود السري.' }, 200, corsHeaders);
+}
+
+async function handleUpdateManagementAccount(request, uid, callerUid, projectId, accessToken, corsHeaders) {
+  const payload = await parseJsonBody(request);
+  const allowed = ['name', 'shift', 'status'];
+  if (!payload || typeof payload !== 'object' || Object.keys(payload).some(key => !allowed.includes(key))) throw createHttpError('حقول تعديل الحساب غير صالحة', 400, 'invalid_management_update');
+  const doc = await getFirestoreDoc(projectId, accessToken, `users/${uid}`);
+  if (!doc) throw createHttpError('الحساب غير موجود', 404, 'management_account_not_found');
+  const current = convertFromFirestoreFields(doc.fields || {});
+  if (!['admin', 'responsible'].includes(current.role)) throw createHttpError('نوع الحساب غير مدعوم', 400, 'invalid_management_role');
+  const changes = {};
+  if (payload.name !== undefined) {
+    if (typeof payload.name !== 'string' || !payload.name.trim() || payload.name.trim().length > 80) throw createHttpError('اسم الحساب غير صالح', 400, 'invalid_management_name');
+    const all = await listFirestoreDocs(projectId, accessToken, 'users', 100);
+    const duplicate = all.documents.map(d => convertFromFirestoreFields(d.fields || {})).some(user => (user.uid || user.id) !== uid && user.role === current.role && String(user.displayName || user.name || '').trim().toLocaleLowerCase() === payload.name.trim().toLocaleLowerCase());
+    if (duplicate) throw createHttpError('الاسم مستخدم في حساب آخر من النوع نفسه', 409, 'management_name_taken');
+    changes.displayName = payload.name.trim(); changes.name = payload.name.trim();
+  }
+  if (payload.shift !== undefined) {
+    if (current.role !== 'responsible' || !['day', 'night'].includes(payload.shift)) throw createHttpError('الوردية غير صالحة لهذا الحساب', 400, 'invalid_responsible_shift');
+    const all = await listFirestoreDocs(projectId, accessToken, 'users', 100);
+    if (all.documents.map(d => convertFromFirestoreFields(d.fields || {})).some(user => (user.uid || user.id) !== uid && user.role === 'responsible' && user.shift === payload.shift)) throw createHttpError('هذه الوردية مخصصة لحساب مسؤول آخر', 409, 'responsible_shift_taken');
+    changes.shift = payload.shift;
+  }
+  if (payload.status !== undefined) {
+    if (!['active', 'inactive'].includes(payload.status)) throw createHttpError('حالة الحساب غير صالحة', 400, 'invalid_management_status');
+    changes.status = payload.status;
+  }
+  const record = { ...current, ...changes, updatedBy: callerUid, updatedAt: new Date().toISOString() };
+  await commitFirestoreTransaction(projectId, accessToken, null, [{ update: { name: `projects/${projectId}/databases/(default)/documents/users/${uid}`, fields: convertToFirestoreFields(record) }, currentDocument: { updateTime: doc.updateTime } }]);
+  return jsonResponse({ success: true, data: { uid, displayName: record.displayName, role: record.role, status: record.status, shift: record.shift || null } }, 200, corsHeaders);
+}
+
+async function handleFreezeManagementAccount(uid, callerUid, projectId, accessToken, corsHeaders) {
+  const doc = await getFirestoreDoc(projectId, accessToken, `users/${uid}`);
+  if (!doc) throw createHttpError('الحساب غير موجود', 404, 'management_account_not_found');
+  const current = convertFromFirestoreFields(doc.fields || {});
+  if (!['admin', 'responsible'].includes(current.role)) throw createHttpError('لا يمكن تجميد هذا النوع من الحسابات', 403, 'management_account_freeze_forbidden');
+  const now = new Date().toISOString();
+  const record = { ...current, status: 'inactive', frozenAt: now, updatedAt: now, updatedBy: callerUid };
+  await commitFirestoreTransaction(projectId, accessToken, null, [{ update: { name: `projects/${projectId}/databases/(default)/documents/users/${uid}`, fields: convertToFirestoreFields(record) }, currentDocument: { updateTime: doc.updateTime } }]);
+  return jsonResponse({ success: true, data: { uid, status: 'inactive', frozen: true } }, 200, corsHeaders);
+}
 
 async function handleManagementLogin(request, env, projectId, accessToken, corsHeaders) {
   const payload = await parseJsonBody(request);
