@@ -2,6 +2,7 @@ import React, { useEffect, useMemo, useState } from 'react';
 import { createShoeModel, deleteShoeModel, listShoeModels, updateShoeModel } from '../lib/modelsApi';
 import type { CreateModelPayload, ShoeCategory, ShoeModel } from '../types/models';
 import { optimizeAndEncodeImage, validateDualImageLimits } from '../utils/imageOptimizer';
+import { readOfflineSnapshot, saveOfflineSnapshot } from '../utils/offlineCache';
 
 const categories: ShoeCategory[] = ['سومال', 'صيافي', 'شتاوي'];
 
@@ -27,8 +28,18 @@ export const ModelsPanel: React.FC<ModelsPanelProps> = ({ readOnly = false }) =>
     try {
       const result = await listShoeModels({ search, category: category || undefined, pageSize: 100 });
       setModels(result.models);
+      setMessage(null);
+      void saveOfflineSnapshot('model-catalog', result.models).catch(() => undefined);
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'تعذر تحميل الموديلات.');
+      const cached = await readOfflineSnapshot<ShoeModel[]>('model-catalog').catch(() => null);
+      if (cached) {
+        const normalizedSearch = search.trim().toLocaleLowerCase();
+        setModels(cached.filter(model => (!category || model.category === category) && (!normalizedSearch || model.name.toLocaleLowerCase().includes(normalizedSearch))));
+        setMessage('الاتصال غير متاح؛ تعرض الآن آخر نسخة محفوظة من كتالوج الموديلات على هذا الهاتف.');
+        setError(null);
+      } else {
+        setError(err instanceof Error ? err.message : 'تعذر تحميل الموديلات، ولا توجد نسخة محفوظة.');
+      }
     } finally {
       setLoading(false);
     }
