@@ -1080,11 +1080,11 @@ async function handleWorkerCycles(request, workerId, projectId, accessToken, cor
     const requested = Number(url.searchParams.get('pageSize') || '100');
     const pageSize = Number.isInteger(requested) ? Math.min(Math.max(requested, 1), 200) : 100;
     const pageToken = url.searchParams.get('pageToken') || null;
-    const rows = await listFirestoreDocs(projectId, accessToken, 'machine_cycles', pageSize, pageToken, '__name__ desc');
+    const rows = await listFirestoreDocs(projectId, accessToken, 'machine_cycles', pageSize, pageToken, '__name__ desc', ['id', 'machineNumber', 'shift', 'date', 'count', 'workerId', 'workerName', 'recordedAt', 'receivedAt', 'hasPhoto']);
     const reports = rows.documents.map(doc => convertFromFirestoreFields(doc.fields || {}))
       .filter(item => item.workerId === workerId)
       .sort((a, b) => String(b.recordedAt || '').localeCompare(String(a.recordedAt || '')))
-      .map(({ photo, ...report }) => ({ ...report, hasPhoto: Boolean(photo) }));
+      .map(report => ({ ...report, hasPhoto: report.hasPhoto !== false }));
     return jsonResponse({ success: true, data: reports, nextPageToken: rows.nextPageToken }, 200, corsHeaders);
   }
   const payload = await parseJsonBody(request, 700 * 1024);
@@ -1110,7 +1110,7 @@ async function handleWorkerCycles(request, workerId, projectId, accessToken, cor
     if (previous.workerId !== workerId) throw createHttpError('تم تسجيل تقرير هذه المكينة والوردية لهذا اليوم بواسطة حساب آخر', 409, 'cycle_report_exists');
   }
   const record = {
-    id, machineNumber, shift, date, count: payload.count, photo,
+    id, machineNumber, shift, date, count: payload.count, photo, hasPhoto: true,
     workerId, workerName: String(worker.name || 'مشرف العمال').slice(0, 100),
     recordedAt, receivedAt: receivedAt.toISOString(), updatedAt: receivedAt.toISOString()
   };
@@ -1142,7 +1142,7 @@ async function handleListCycles(request, projectId, accessToken, corsHeaders) {
   const result = await listFirestoreDocs(projectId, accessToken, 'machine_cycles', pageSize, pageToken, '__name__ desc');
   const data = result.documents.map(doc => convertFromFirestoreFields(doc.fields || {}))
     .sort((a, b) => String(b.recordedAt || '').localeCompare(String(a.recordedAt || '')))
-    .map(({ photo, ...report }) => ({ ...report, hasPhoto: Boolean(photo) }));
+    .map(report => ({ ...report, hasPhoto: report.hasPhoto !== false }));
   return jsonResponse({ success: true, data, nextPageToken: result.nextPageToken }, 200, corsHeaders);
 }
 
@@ -2350,11 +2350,14 @@ async function getFirestoreDoc(projectId, accessToken, path, transactionId) {
   return await resp.json();
 }
 
-async function listFirestoreDocs(projectId, accessToken, collection, pageSize, pageToken, orderBy) {
+async function listFirestoreDocs(projectId, accessToken, collection, pageSize, pageToken, orderBy, fieldMask) {
   const url = new URL(`${FIRESTORE_BASE_URL}/${projectId}/databases/(default)/documents/${collection}`);
   url.searchParams.set('pageSize', String(pageSize));
   if (pageToken) url.searchParams.set('pageToken', pageToken);
   if (orderBy) url.searchParams.set('orderBy', orderBy);
+  if (Array.isArray(fieldMask)) {
+    for (const fieldPath of fieldMask) url.searchParams.append('mask.fieldPaths', fieldPath);
+  }
   const resp = await fetch(url, {
     headers: { Authorization: `Bearer ${accessToken}` },
   });
