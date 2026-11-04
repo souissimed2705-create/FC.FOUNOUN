@@ -150,7 +150,7 @@ export const OperationsPanel: React.FC<Props> = ({ initialSection, admin }) => {
   const addWorker = (e: React.FormEvent) => {
     e.preventDefault();
     if (!name.trim()) { setError('اسم العامل مطلوب.'); return; }
-    if (isSupervisor && !/^\\d{6}$/.test(newWorkerPin)) { setError('عيّن للعامل PIN من 6 أرقام قبل إنشاء الحساب.'); return; }
+    if (isSupervisor && !/^\d{6}$/.test(newWorkerPin)) { setError('عيّن للعامل PIN من 6 أرقام قبل إنشاء الحساب.'); return; }
     if (isSupervisor && !navigator.onLine) { setError('إنشاء العامل مع تعيين PIN يتطلب اتصالاً بالإنترنت لحماية الرمز السري وعدم حفظه مكشوفاً على الهاتف.'); return; }
     const payload = { name: name.trim(), ...(!isResponsible ? { phone: phone.trim() } : {}), machineNumber: Number(machineNumber) as 1 | 2 | 3, shift, ...(isSupervisor ? { pin: newWorkerPin } : {}), clientMutationId: crypto.randomUUID() };
     const fallback = !isSupervisor ? { path: '/api/workers', init: { method: 'POST' as const, body: JSON.stringify(payload) } } : undefined;
@@ -223,7 +223,7 @@ export const OperationsPanel: React.FC<Props> = ({ initialSection, admin }) => {
         {!isResponsible && <label className="block text-xs text-gray-300">رقم الهاتف (اختياري)<input className="field mt-1 w-full" placeholder="رقم الهاتف" value={phone} onChange={e => setPhone(e.target.value)} /></label>}
         <label className="block text-xs text-gray-300">تعيين المكينة<select className="field mt-1 w-full" value={machineNumber} onChange={e => setMachineNumber(e.target.value as '1' | '2' | '3')}><option value="1">المكينة 1</option><option value="2">المكينة 2</option><option value="3">المكينة 3</option></select></label>
         <label className="block text-xs text-gray-300">تعيين الوردية<select className="field mt-1 w-full" value={shift} onChange={e => setShift(e.target.value as 'day' | 'night')}><option value="day">الوردية النهارية</option><option value="night">الوردية الليلية</option></select></label>
-        {isSupervisor && <label className="block text-xs text-[#F5D77F] sm:col-span-2">رمز دخول العامل PIN (6 أرقام)<input className="field mt-1 w-full text-center tracking-[0.35em]" type="password" inputMode="numeric" autoComplete="new-password" maxLength={6} placeholder="عيّن رمز الدخول السري" value={newWorkerPin} onChange={e => setNewWorkerPin(e.target.value.replace(/\\D/g, '').slice(0, 6))} /><span className="mt-1 block text-[11px] text-gray-500">المشرف العام وحده يعيّن الرمز. لا يُحفظ الرمز كنص مكشوف.</span></label>}
+        {isSupervisor && <label className="block text-xs text-[#F5D77F] sm:col-span-2">رمز دخول العامل PIN (6 أرقام)<input className="field mt-1 w-full text-center tracking-[0.35em]" type="password" inputMode="numeric" autoComplete="new-password" maxLength={6} placeholder="عيّن رمز الدخول السري" value={newWorkerPin} onChange={e => setNewWorkerPin(e.target.value.replace(/\D/g, '').slice(0, 6))} /><span className="mt-1 block text-[11px] text-gray-500">المشرف العام وحده يعيّن الرمز. لا يُحفظ الرمز كنص مكشوف.</span></label>}
         <button className="gold-button sm:col-span-2">إضافة مشرف عمال وحفظ بيانات الدخول</button>
       </form>
       <div className="space-y-2">{workers.map(w => <div key={w.id} className="flex flex-wrap items-center gap-2 rounded-xl border border-white/10 bg-[#0A0A0A] p-3">
