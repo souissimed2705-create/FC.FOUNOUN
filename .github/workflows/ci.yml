@@ -8,6 +8,7 @@ on:
   push:
     branches:
       - fix/operations-contracts
+      - fix/operations-contracts-rbac
 
 permissions:
   contents: read
