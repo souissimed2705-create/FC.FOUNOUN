@@ -595,7 +595,7 @@ export function buildResponsibleShiftReservationWrite(projectId, uid, shift, slo
   return write;
 }
 
-export export function workerMachineSlotPath(machineNumber, shift) {
+export function workerMachineSlotPath(machineNumber, shift) {
   if (![1, 2, 3].includes(machineNumber) || !['day', 'night'].includes(shift)) {
     throw createHttpError('تعيين المكينة أو الوردية غير صالح', 400, 'worker_assignment_required');
   }
@@ -620,7 +620,7 @@ export function buildWorkerMachineReservationWrite(projectId, workerId, machineN
   return write;
 }
 
-function buildWorkerFreezeUpdate(current, timestamp) {
+export function buildWorkerFreezeUpdate(current, timestamp) {
   return { ...current, status: 'inactive', frozenAt: timestamp, updatedAt: timestamp };
 }
 
