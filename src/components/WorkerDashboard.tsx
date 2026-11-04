@@ -78,7 +78,8 @@ export const WorkerDashboard: React.FC<Props> = ({ worker }) => {
     if (!Number.isSafeInteger(count) || count < 0) { setError('أدخل عدداً صحيحاً غير سالب للدورات.'); return; }
     if (!cyclePhoto) { setError('صورة عداد المكينة إلزامية.'); return; }
     setBusy(true); setError(''); setNotice('');
-    try { if (!navigator.onLine) { queueMutation('/api/worker/cycles', { method: 'POST', body: JSON.stringify({ count, photo: cyclePhoto }) }); setPendingSync(queuedMutationCount()); setNotice('لا يوجد اتصال؛ حُفظ تقرير الدورات وصورة العداد على الهاتف وسيتزامن عند عودة الاتصال.'); } else { await submitMachineCycle(count, cyclePhoto); setNotice('تم حفظ تقرير الدورات وصورة العداد مع التاريخ والوقت تلقائياً.'); await refreshCycles(); } setCycleCount(''); setCyclePhoto(''); setCyclePhotoName(''); }
+    const recordedAt = new Date().toISOString();
+    try { if (!navigator.onLine) { queueMutation('/api/worker/cycles', { method: 'POST', body: JSON.stringify({ count, photo: cyclePhoto, recordedAt }) }); setPendingSync(queuedMutationCount()); setNotice('لا يوجد اتصال؛ حُفظ تقرير الدورات وصورة العداد ووقت التسجيل على الهاتف وسيتزامن عند عودة الاتصال.'); } else { await submitMachineCycle(count, cyclePhoto, recordedAt); setNotice('تم حفظ تقرير الدورات وصورة العداد مع التاريخ والوقت تلقائياً.'); await refreshCycles(); } setCycleCount(''); setCyclePhoto(''); setCyclePhotoName(''); }
     catch (err) { setError(err instanceof Error ? err.message : 'تعذر حفظ تقرير الدورات.'); }
     finally { setBusy(false); }
   };
