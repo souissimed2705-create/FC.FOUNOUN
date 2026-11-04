@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { MessageCircle } from 'lucide-react';
-import { createTask, createWorker, flushQueuedMutations, listConversation, listTasks, listWorkers, queuedMutationCount, recordProgress, sendManagementMessage, setWorkerPin, updateWorker } from '../lib/operationsApi';
+import { createTask, createWorker, flushQueuedMutations, listConversation, listTasks, listWorkers, queuedMutationCount, recordProgress, sendManagementMessage, setWorkerPin, updateTask, updateWorker } from '../lib/operationsApi';
 import { listShoeModels } from '../lib/modelsApi';
 import type { ShoeModel } from '../types/models';
 import type { ChatMessage, TaskRecord, WorkerRecord } from '../types/operations';
@@ -24,6 +24,7 @@ export const OperationsPanel: React.FC<Props> = ({ initialSection, admin }) => {
   const [assignedWorkerId, setAssignedWorkerId] = useState('');
   const [targetQuantity, setTargetQuantity] = useState('');
   const [description, setDescription] = useState('');
+  const [editingTaskId, setEditingTaskId] = useState<string | null>(null);
   const [progressId, setProgressId] = useState('');
   const [progressQuantity, setProgressQuantity] = useState('');
   const [selectedWorkerId, setSelectedWorkerId] = useState('');
@@ -106,8 +107,14 @@ export const OperationsPanel: React.FC<Props> = ({ initialSection, admin }) => {
       return;
     }
     const payload = { title: 'إنتاج مودال ' + model.name, description: description.trim(), modelId: model.id, modelName: model.name, modelCategory: model.category, assignedWorkerId, targetQuantity: qty };
-    void runMutation(() => createTask(payload), { path: '/api/tasks', init: { method: 'POST', body: JSON.stringify(payload) } });
-    setModelId(''); setTargetQuantity(''); setDescription('');
+    if (editingTaskId) {
+      const task = tasks.find(item => item.id === editingTaskId);
+      if (task && qty < task.completedQuantity) { setError('لا يمكن جعل الكمية المطلوبة أقل من الكمية المنجزة بالفعل.'); return; }
+      void runMutation(() => updateTask(editingTaskId, payload), { path: '/api/tasks/' + encodeURIComponent(editingTaskId), init: { method: 'PUT', body: JSON.stringify(payload) } });
+    } else {
+      void runMutation(() => createTask(payload), { path: '/api/tasks', init: { method: 'POST', body: JSON.stringify(payload) } });
+    }
+    setModelId(''); setTargetQuantity(''); setDescription(''); setEditingTaskId(null);
   };
 
   const addProgress = (e: React.FormEvent) => {
@@ -174,7 +181,7 @@ export const OperationsPanel: React.FC<Props> = ({ initialSection, admin }) => {
 
     {section === 'tasks' && <div className="space-y-5">
       <div className="rounded-xl border border-[#D4AF37]/25 bg-[#0A0A0A] p-4 space-y-3">
-        <h3 className="font-bold text-[#F5D77F]">إصدار أمر إنتاج جديد</h3>
+        <h3 className="font-bold text-[#F5D77F]">{editingTaskId ? 'تعديل أمر الإنتاج' : 'إصدار أمر إنتاج جديد'}</h3>
         <form onSubmit={addTask} className="grid grid-cols-1 sm:grid-cols-2 gap-2">
           <select className="field" value={modelId} onChange={e => setModelId(e.target.value)}>
             <option value="">اختر نوع المودال</option>
@@ -186,7 +193,7 @@ export const OperationsPanel: React.FC<Props> = ({ initialSection, admin }) => {
           </select>
           <input className="field" type="number" min="1" step="1" placeholder="الكمية المطلوبة" value={targetQuantity} onChange={e => setTargetQuantity(e.target.value)} />
           <input className="field" placeholder="ملاحظة أو تعليمات (اختياري)" value={description} onChange={e => setDescription(e.target.value)} />
-          <button className="gold-button sm:col-span-2">إرسال أمر الإنتاج للعامل</button>
+          <div className="sm:col-span-2 flex gap-2"><button className="gold-button flex-1">{editingTaskId ? 'حفظ تعديل أمر الإنتاج' : 'إرسال أمر الإنتاج للعامل'}</button>{editingTaskId && <button type="button" className="secondary-button" onClick={() => { setEditingTaskId(null); setModelId(''); setAssignedWorkerId(''); setTargetQuantity(''); setDescription(''); }}>إلغاء التعديل</button>}</div>
         </form>
       </div>
 
@@ -206,6 +213,7 @@ export const OperationsPanel: React.FC<Props> = ({ initialSection, admin }) => {
         {t.description && <p className="text-sm text-gray-400 mt-1">{t.description}</p>}
         <p className="text-xs text-gray-400 mt-1">العامل: {t.assignedWorkerName || t.assignedWorkerId} · المطلوب: {t.targetQuantity} · المنجز: {t.completedQuantity} · المتبقي: {Math.max(0, t.targetQuantity - t.completedQuantity)}</p>
         <div className="mt-2 h-2 rounded-full bg-white/10"><div className="h-2 rounded-full bg-[#D4AF37]" style={{ width: Math.min(100, t.completedQuantity / Math.max(1, t.targetQuantity) * 100) + '%' }} /></div>
+        <div className="mt-3 flex justify-end"><button className="secondary-button" disabled={t.status === 'completed' || t.status === 'cancelled'} onClick={() => { setEditingTaskId(t.id); setModelId(t.modelId || ''); setAssignedWorkerId(t.assignedWorkerId); setTargetQuantity(String(t.targetQuantity)); setDescription(t.description || ''); setSection('tasks'); window.scrollTo({ top: 0, behavior: 'smooth' }); }}>تعديل أمر الإنتاج</button></div>
       </article>)}</div>
     </div>}
 
