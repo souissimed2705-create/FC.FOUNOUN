@@ -33,6 +33,7 @@ import {
   isOriginAllowed,
   convertToFirestoreFields,
   convertFromFirestoreFields,
+  resolveCycleRecordedAt,
 } from '../worker/worker.js';
 
 export async function runAllTests() {
@@ -349,6 +350,26 @@ export async function runAllTests() {
   assert(frozenWorker.status === 'inactive', 'تحويل حالة العامل إلى inactive عند التجميد');
   assert(frozenWorker.id === originalWorker.id && frozenWorker.name === originalWorker.name, 'الاحتفاظ بسجل العامل وبياناته دون حذف');
   assert(frozenWorker.frozenAt === '2026-11-04T10:00:00.000Z' && frozenWorker.updatedAt === frozenWorker.frozenAt, 'تسجيل وقت التجميد والتحديث');
+  // 10. Machine-cycle report timestamps survive offline synchronization.
+  console.log('\\n10. اختبارات وقت تسجيل تقارير دورات المكائن والمزامنة دون اتصال:');
+  const cycleServerNow = new Date('2026-11-04T20:00:00.000Z');
+  assert(
+    resolveCycleRecordedAt('2026-11-04T18:30:00.000Z', cycleServerNow) === '2026-11-04T18:30:00.000Z',
+    'الاحتفاظ بوقت التسجيل الأصلي عند مزامنة تقرير محفوظ دون اتصال'
+  );
+  assert(
+    resolveCycleRecordedAt(undefined, cycleServerNow) === cycleServerNow.toISOString(),
+    'استخدام وقت الخادم تلقائياً للعملاء الذين لا يرسلون وقتاً'
+  );
+  let invalidCycleTimeRejected = false;
+  try { resolveCycleRecordedAt('not-a-date', cycleServerNow); }
+  catch (err: any) { invalidCycleTimeRejected = err.code === 'invalid_cycle_recorded_at'; }
+  assert(invalidCycleTimeRejected, 'رفض وقت تسجيل غير صالح');
+  let futureCycleTimeRejected = false;
+  try { resolveCycleRecordedAt('2026-11-04T20:10:00.000Z', cycleServerNow); }
+  catch (err: any) { futureCycleTimeRejected = err.code === 'future_cycle_recorded_at'; }
+  assert(futureCycleTimeRejected, 'رفض وقت تسجيل يقع في المستقبل بأكثر من خمس دقائق');
+
 
   console.log('\n====================================================');
   console.log(`إجمالي الاختبارات: ${passed + failed} | نجح: ${passed} | فشل: ${failed}`);
