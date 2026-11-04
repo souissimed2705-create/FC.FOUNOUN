@@ -15,7 +15,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ admin, onLogout,
   const roleName = isSupervisor ? 'المشرف العام' : admin.role === 'responsible' ? 'المسؤول' : 'المدير العام';
   const greeting = isSupervisor
     ? 'أهلاً بك. أشرف على العمال ورموز الدخول وتابع سير الإنتاج.'
-    : admin.role === 'responsible' ? 'أهلاً بك. أدر مشرفي العمال والمكائن والورديات والموديلات وأوامر الإنتاج.' : 'أهلاً بك. أشرف على سير الإنتاج وأدر العمليات المسموح بها.';
+    : admin.role === 'responsible' ? 'أهلاً بك. أدر مشرفي العمال والمكائن والورديات والموديلات وتابع تقارير دورات المكائن.' : 'أهلاً بك. أشرف على سير الإنتاج وأدر العمليات المسموح بها.';
 
   const go = (next: Page) => setPage(next);
   const backHome = () => setPage('home');
@@ -62,10 +62,10 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ admin, onLogout,
           <span className="flex h-14 w-14 shrink-0 items-center justify-center rounded-xl bg-[#D4AF37]/10 text-[#F5D77F]"><Package className="h-7 w-7" /></span>
           <span><strong className="block text-base text-white">الموديلات والبحث</strong><small className="mt-1 block text-xs leading-5 text-gray-400">عرض الموديلات والبحث عنها وإضافة بياناتها وتعديلها.</small></span>
         </button>
-        <button onClick={() => go('tasks')} className="group flex min-h-28 items-center gap-4 rounded-2xl border border-[#D4AF37]/35 bg-[#111] p-5 text-right transition hover:border-[#D4AF37] hover:bg-[#19160E]">
+        {admin.role !== 'responsible' && <button onClick={() => go('tasks')} className="group flex min-h-28 items-center gap-4 rounded-2xl border border-[#D4AF37]/35 bg-[#111] p-5 text-right transition hover:border-[#D4AF37] hover:bg-[#19160E]">
           <span className="flex h-14 w-14 shrink-0 items-center justify-center rounded-xl bg-[#D4AF37]/10 text-[#F5D77F]"><ClipboardList className="h-7 w-7" /></span>
           <span><strong className="block text-base text-white">المهام وأوامر الإنتاج</strong><small className="mt-1 block text-xs leading-5 text-gray-400">إصدار الأوامر وتعيين العمال ومتابعة الإنجاز والتواصل.</small></span>
-        </button>
+        </button>}
         {isSupervisor && <button onClick={() => go('supervisor')} className="sm:col-span-2 flex min-h-24 items-center gap-4 rounded-2xl border border-[#D4AF37]/60 bg-gradient-to-l from-[#211B0B] to-[#111] p-5 text-right transition hover:border-[#F5D77F]">
           <span className="flex h-14 w-14 shrink-0 items-center justify-center rounded-xl bg-[#D4AF37]/15 text-[#F5D77F]"><Crown className="h-7 w-7" /></span>
           <span><strong className="block text-base text-[#F5D77F]">مركز المشرف</strong><small className="mt-1 block text-xs leading-5 text-gray-400">إدارة العمال ورموز PIN والتجميد وإعادة التفعيل وإعدادات الإشراف.</small></span>
@@ -75,7 +75,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ admin, onLogout,
     </>}
 
     {page === 'models' && <ModelsPanel readOnly={false} />}
-    {page === 'tasks' && <OperationsPanel initialSection="tasks" admin={admin} />}
+    {page === 'tasks' && admin.role !== 'responsible' && <OperationsPanel initialSection="tasks" admin={admin} />}
     {page === 'supervisor' && isSupervisor && <section className="space-y-3 rounded-2xl border border-[#D4AF37]/25 bg-[#111] p-4">
       <div><h3 className="font-bold text-[#F5D77F]">أدوات المشرف</h3><p className="mt-1 text-xs leading-6 text-gray-400">هذه الصفحة خاصة بحساب المشرف، ولا تظهر للمسؤول أو العامل.</p></div>
       <button onClick={() => go('workers')} className="flex w-full items-center gap-3 rounded-xl border border-white/10 bg-[#090909] p-4 text-right hover:border-[#D4AF37]/60">
