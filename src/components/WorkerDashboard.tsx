@@ -153,7 +153,7 @@ export const WorkerDashboard: React.FC<Props> = ({ worker }) => {
       </form>
       <div className="space-y-2"><div className="flex items-center justify-between"><h4 className="font-semibold">سجل تقاريري السابقة</h4><button className="secondary-button" onClick={() => void refreshCycles()}>تحديث</button></div>
         {!cycles.length && <p className="py-4 text-center text-xs text-gray-500">لا توجد تقارير مسجلة بعد.</p>}
-        {cycles.map(report => <article key={report.id} className="rounded-xl border border-white/10 bg-[#080808] p-3"><div className="flex justify-between gap-2"><b>المكينة {report.machineNumber} · {report.shift === 'day' ? 'النهار' : 'الليل'}</b><strong className="text-[#F5D77F]">{report.count.toLocaleString('ar-TN')} دورة</strong></div><p className="mt-1 text-xs text-gray-400">{report.date} · {new Date(report.recordedAt).toLocaleTimeString('ar-TN')}</p></article>)}
+        {cycles.map(report => <article key={report.id} className="rounded-xl border border-white/10 bg-[#080808] p-3"><div className="flex justify-between gap-2"><b>المكينة {report.machineNumber} · {report.shift === 'day' ? 'النهار' : 'الليل'}</b><strong className="text-[#F5D77F]">{report.count.toLocaleString('ar-TN', { timeZone: 'Africa/Tunis' })} دورة</strong></div><p className="mt-1 text-xs text-gray-400">{report.date} · {new Date(report.recordedAt).toLocaleTimeString('ar-TN', { timeZone: 'Africa/Tunis' })}</p></article>)}
       </div>
     </div>}
 
