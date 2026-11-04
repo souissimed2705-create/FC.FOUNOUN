@@ -433,7 +433,9 @@ async function handleCreateResource(request, resource, callerUid, projectId, acc
 async function handleUpdateResource(request, resource, id, callerUid, projectId, accessToken, corsHeaders, callerRole = null) {
   const payload = await parseJsonBody(request);
   validateResourcePayload(payload, resource, false);
-  
+  if (resource === 'workers' && callerRole === 'responsible' && Object.keys(payload || {}).some(key => !['name', 'machineNumber', 'shift', 'status'].includes(key))) {
+    throw createHttpError('المسؤول يستطيع تعديل الاسم والمكينة والوردية وحالة الحساب فقط', 403, 'responsible_worker_field_forbidden');
+  }
   const currentDoc = await getFirestoreDoc(projectId, accessToken, `${resource}/${id}`);
   if (!currentDoc) throw createHttpError('المورد المطلوب غير موجود', 404, 'resource_not_found');
   const current = convertFromFirestoreFields(currentDoc.fields || {});
