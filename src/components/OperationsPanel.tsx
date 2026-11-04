@@ -1,12 +1,12 @@
 import React, { useEffect, useState } from 'react';
-import { MessageCircle } from 'lucide-react';
-import { createTask, createWorker, flushQueuedMutations, listConversation, listTasks, listWorkers, queuedMutationCount, recordProgress, sendManagementMessage, setWorkerPin, updateTask, updateWorker } from '../lib/operationsApi';
+import { MessageCircle, Gauge } from 'lucide-react';
+import { createTask, createWorker, flushQueuedMutations, listConversation, listTasks, listWorkers, queuedMutationCount, recordProgress, sendManagementMessage, setWorkerPin, updateTask, updateWorker, listMachineCycles } from '../lib/operationsApi';
 import { listShoeModels } from '../lib/modelsApi';
 import type { ShoeModel } from '../types/models';
-import type { ChatMessage, TaskRecord, WorkerRecord } from '../types/operations';
+import type { ChatMessage, TaskRecord, WorkerRecord, MachineCycleRecord } from '../types/operations';
 import type { UserProfile } from '../lib/firebase';
 
-type Section = 'workers' | 'tasks' | 'messages';
+type Section = 'workers' | 'tasks' | 'messages' | 'cycles';
 interface Props { initialSection: 'workers' | 'tasks'; admin: UserProfile; }
 
 export const OperationsPanel: React.FC<Props> = ({ initialSection, admin }) => {
@@ -17,6 +17,9 @@ export const OperationsPanel: React.FC<Props> = ({ initialSection, admin }) => {
   const [models, setModels] = useState<ShoeModel[]>([]);
   const [name, setName] = useState('');
   const [phone, setPhone] = useState('');
+  const [machineNumber, setMachineNumber] = useState<'1' | '2' | '3'>('1');
+  const [shift, setShift] = useState<'day' | 'night'>('day');
+  const [cycles, setCycles] = useState<MachineCycleRecord[]>([]);
   const [workerEdits, setWorkerEdits] = useState<Record<string, { name: string; phone: string }>>({});
   const [pinId, setPinId] = useState('');
   const [pin, setPin] = useState('');
@@ -38,11 +41,12 @@ export const OperationsPanel: React.FC<Props> = ({ initialSection, admin }) => {
   const refresh = async () => {
     setError(null);
     try {
-      const [w, t, m] = await Promise.all([listWorkers(), listTasks(), listShoeModels({ pageSize: 100 })]);
+      const [w, t, m, c] = await Promise.all([listWorkers(), listTasks(), listShoeModels({ pageSize: 100 }), listMachineCycles()]);
       setWorkers(w.data || []);
       setWorkerEdits(current => Object.fromEntries((w.data || []).map(worker => [worker.id, current[worker.id] || { name: worker.name, phone: worker.phone || '' }])));
       setTasks(t.data || []);
       setModels(m.models || []);
+      setCycles(c.data || []);
       setSelectedWorkerId(current => current || w.data?.[0]?.id || '');
     } catch (e) {
       setError(e instanceof Error ? e.message : 'تعذر تحميل البيانات.');
@@ -94,7 +98,7 @@ export const OperationsPanel: React.FC<Props> = ({ initialSection, admin }) => {
   const addWorker = (e: React.FormEvent) => {
     e.preventDefault();
     if (!name.trim()) { setError('اسم العامل مطلوب.'); return; }
-    void runMutation(() => createWorker({ name: name.trim(), phone: phone.trim() }), { path: '/api/workers', init: { method: 'POST', body: JSON.stringify({ name: name.trim(), phone: phone.trim() }) } });
+    void runMutation(() => createWorker({ name: name.trim(), phone: phone.trim(), machineNumber: Number(machineNumber) as 1 | 2 | 3, shift }), { path: '/api/workers', init: { method: 'POST', body: JSON.stringify({ name: name.trim(), phone: phone.trim(), machineNumber: Number(machineNumber), shift }) } });
     setName(''); setPhone('');
   };
 
@@ -106,6 +110,8 @@ export const OperationsPanel: React.FC<Props> = ({ initialSection, admin }) => {
       setError('اختر المودال والعامل وأدخل الكمية المطلوبة بصورة صحيحة.');
       return;
     }
+    const selectedWorker = workers.find(worker => worker.id === assignedWorkerId);
+    if (!selectedWorker?.machineNumber || !selectedWorker.shift) { setError('يجب ربط مشرف العمال بمكينة ووردية قبل إسناد أمر الإنتاج.'); return; }
     const payload = { title: 'إنتاج مودال ' + model.name, description: description.trim(), modelId: model.id, modelName: model.name, modelCategory: model.category, assignedWorkerId, targetQuantity: qty };
     if (editingTaskId) {
       const task = tasks.find(item => item.id === editingTaskId);
@@ -145,6 +151,7 @@ export const OperationsPanel: React.FC<Props> = ({ initialSection, admin }) => {
   const tabs: { id: Section; label: string }[] = [
     ...(isSupervisor ? [{ id: 'workers' as const, label: 'إدارة العمال' }] : []),
     { id: 'tasks', label: 'أوامر الإنتاج' },
+    { id: 'cycles', label: 'عدد دورات المكائن' },
     { id: 'messages', label: 'المحادثة' },
   ];
 
@@ -162,12 +169,14 @@ export const OperationsPanel: React.FC<Props> = ({ initialSection, admin }) => {
       <form onSubmit={addWorker} className="grid grid-cols-1 sm:grid-cols-3 gap-2">
         <input className="field" placeholder="اسم العامل" value={name} onChange={e => setName(e.target.value)} />
         <input className="field" placeholder="الهاتف (اختياري)" value={phone} onChange={e => setPhone(e.target.value)} />
-        <button className="gold-button">إضافة عامل</button>
+        <select className="field" value={machineNumber} onChange={e => setMachineNumber(e.target.value as '1' | '2' | '3')}><option value="1">المكينة 1</option><option value="2">المكينة 2</option><option value="3">المكينة 3</option></select>
+        <select className="field" value={shift} onChange={e => setShift(e.target.value as 'day' | 'night')}><option value="day">الوردية النهارية</option><option value="night">الوردية الليلية</option></select>
+        <button className="gold-button">إضافة مشرف عمال</button>
       </form>
       <div className="space-y-2">{workers.map(w => <div key={w.id} className="flex flex-wrap items-center gap-2 rounded-xl border border-white/10 bg-[#0A0A0A] p-3">
         <input className="field min-w-0 flex-1" aria-label="اسم العامل" value={workerEdits[w.id]?.name ?? w.name} onChange={e => setWorkerEdits(current => ({ ...current, [w.id]: { name: e.target.value, phone: current[w.id]?.phone ?? w.phone ?? '' } }))} />
         <input className="field w-32" aria-label="هاتف العامل" value={workerEdits[w.id]?.phone ?? w.phone ?? ''} onChange={e => setWorkerEdits(current => ({ ...current, [w.id]: { name: current[w.id]?.name ?? w.name, phone: e.target.value } }))} />
-        <span className="text-xs text-[#F5D77F] font-mono">الرمز: {w.id}</span>
+        <span className="text-xs text-[#F5D77F]">المكينة {w.machineNumber ?? 'غير محددة'} · {w.shift === 'day' ? 'نهار' : w.shift === 'night' ? 'ليل' : 'وردية غير محددة'}</span><span className="text-xs text-gray-500 font-mono">المعرّف: {w.id}</span>
         <span className="text-xs text-gray-400">{w.status}</span>
         <button className="secondary-button" onClick={() => void runMutation(() => updateWorker(w.id, workerEdits[w.id] || { name: w.name, phone: w.phone || '' }))}>حفظ البيانات</button>
         <input className="field w-28" inputMode="numeric" maxLength={6} placeholder="PIN جديد" value={pinId === w.id ? pin : ''} onChange={e => { setPinId(w.id); setPin(e.target.value.replace(/\D/g, '')); }} />
@@ -189,7 +198,7 @@ export const OperationsPanel: React.FC<Props> = ({ initialSection, admin }) => {
           </select>
           <select className="field" value={assignedWorkerId} onChange={e => setAssignedWorkerId(e.target.value)}>
             <option value="">اختر العامل</option>
-            {workers.filter(w => w.status === 'active').map(w => <option key={w.id} value={w.id}>{w.name}</option>)}
+            {workers.filter(w => w.status === 'active').map(w => <option key={w.id} value={w.id}>{w.name} — مكينة {w.machineNumber ?? '?'} — {w.shift === 'day' ? 'نهار' : w.shift === 'night' ? 'ليل' : 'غير محدد'}</option>)}
           </select>
           <input className="field" type="number" min="1" step="1" placeholder="الكمية المطلوبة" value={targetQuantity} onChange={e => setTargetQuantity(e.target.value)} />
           <input className="field" placeholder="ملاحظة أو تعليمات (اختياري)" value={description} onChange={e => setDescription(e.target.value)} />
@@ -211,10 +220,17 @@ export const OperationsPanel: React.FC<Props> = ({ initialSection, admin }) => {
       <div className="space-y-2">{tasks.map(t => <article key={t.id} className="rounded-xl border border-white/10 bg-[#0A0A0A] p-3">
         <div className="flex justify-between gap-2"><b>{t.modelName || t.title}</b><span className="text-xs text-[#F5D77F]">{taskStatusLabel(t.status)}</span></div>
         {t.description && <p className="text-sm text-gray-400 mt-1">{t.description}</p>}
-        <p className="text-xs text-gray-400 mt-1">العامل: {t.assignedWorkerName || t.assignedWorkerId} · المطلوب: {t.targetQuantity} · المنجز: {t.completedQuantity} · المتبقي: {Math.max(0, t.targetQuantity - t.completedQuantity)}</p>
+        <p className="text-xs text-gray-400 mt-1">المكينة: {t.machineNumber ?? '—'} · الوردية: {t.shift === 'day' ? 'نهار' : t.shift === 'night' ? 'ليل' : '—'} · مشرف العمال: {t.assignedWorkerName || t.assignedWorkerId} · المطلوب: {t.targetQuantity} · المنجز: {t.completedQuantity} · المتبقي: {Math.max(0, t.targetQuantity - t.completedQuantity)}</p>
         <div className="mt-2 h-2 rounded-full bg-white/10"><div className="h-2 rounded-full bg-[#D4AF37]" style={{ width: Math.min(100, t.completedQuantity / Math.max(1, t.targetQuantity) * 100) + '%' }} /></div>
         <div className="mt-3 flex justify-end"><button className="secondary-button" disabled={t.status === 'completed' || t.status === 'cancelled'} onClick={() => { setEditingTaskId(t.id); setModelId(t.modelId || ''); setAssignedWorkerId(t.assignedWorkerId); setTargetQuantity(String(t.targetQuantity)); setDescription(t.description || ''); setSection('tasks'); window.scrollTo({ top: 0, behavior: 'smooth' }); }}>تعديل أمر الإنتاج</button></div>
       </article>)}</div>
+    </div>}
+
+    {section === 'cycles' && <div className="space-y-3">
+      <div className="flex items-center gap-2"><Gauge className="h-5 w-5 text-[#D4AF37]" /><h3 className="font-bold text-[#F5D77F]">تقارير عدد دورات المكائن</h3></div>
+      <p className="text-xs leading-6 text-gray-400">تُعرض تقارير كل مكينة ووردية بصورة مستقلة. لا يتم جمع دورات النهار مع الليل.</p>
+      {!cycles.length && <p className="rounded-xl border border-white/10 bg-[#080808] p-6 text-center text-sm text-gray-500">لا توجد تقارير دورات مسجلة.</p>}
+      {cycles.map(report => <article key={report.id} className="rounded-xl border border-white/10 bg-[#080808] p-3"><div className="flex flex-wrap items-center justify-between gap-2"><b>المكينة {report.machineNumber} · {report.shift === 'day' ? 'النهار' : 'الليل'}</b><strong className="text-[#F5D77F]">{report.count.toLocaleString('ar-TN')} دورة</strong></div><p className="mt-1 text-xs text-gray-400">{report.date} · {new Date(report.recordedAt).toLocaleString('ar-TN')} · {report.workerName}</p><p className="mt-1 text-xs text-gray-500">{report.hasPhoto ? 'صورة العداد محفوظة' : 'لا توجد صورة مرفقة'}</p></article>)}
     </div>}
 
     {section === 'messages' && <div className="space-y-3">
