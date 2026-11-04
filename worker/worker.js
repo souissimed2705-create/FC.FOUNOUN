@@ -674,6 +674,7 @@ async function handleFreezeManagementAccount(uid, callerUid, projectId, accessTo
   if (!doc) throw createHttpError('الحساب غير موجود', 404, 'management_account_not_found');
   const current = convertFromFirestoreFields(doc.fields || {});
   if (!['admin', 'responsible'].includes(current.role)) throw createHttpError('لا يمكن تجميد هذا النوع من الحسابات', 403, 'management_account_freeze_forbidden');
+  assertManagementAccountUpdateAllowed(current, { status: 'inactive' }, [], uid, callerUid);
   const now = new Date().toISOString();
   const record = { ...current, status: 'inactive', frozenAt: now, updatedAt: now, updatedBy: callerUid };
   await commitFirestoreTransaction(projectId, accessToken, null, [{ update: { name: `projects/${projectId}/databases/(default)/documents/users/${uid}`, fields: convertToFirestoreFields(record) }, currentDocument: { updateTime: doc.updateTime } }]);
