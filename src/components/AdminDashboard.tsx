@@ -74,7 +74,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ admin, onLogout,
       </div>
     </>}
 
-    {page === 'models' && <ModelsPanel />}
+    {page === 'models' && <ModelsPanel readOnly={admin.role === 'responsible'} />}
     {page === 'tasks' && <OperationsPanel initialSection="tasks" admin={admin} />}
     {page === 'supervisor' && isSupervisor && <section className="space-y-3 rounded-2xl border border-[#D4AF37]/25 bg-[#111] p-4">
       <div><h3 className="font-bold text-[#F5D77F]">أدوات المشرف</h3><p className="mt-1 text-xs leading-6 text-gray-400">هذه الصفحة خاصة بحساب المشرف، ولا تظهر للمسؤول أو العامل.</p></div>
