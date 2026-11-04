@@ -21,20 +21,26 @@ export const ModelsPanel: React.FC<ModelsPanelProps> = ({ readOnly = false }) =>
   const [message, setMessage] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [zoomed, setZoomed] = useState<string | null>(null);
+  const [nextPageToken, setNextPageToken] = useState<string | null>(null);
 
-  const loadModels = async () => {
+  const loadModels = async (reset = true) => {
     setLoading(true);
     setError(null);
     try {
-      const result = await listShoeModels({ search, category: category || undefined, pageSize: 100 });
-      setModels(result.models);
+      const result = await listShoeModels({ search, category: category || undefined, pageSize: 50, pageToken: reset ? undefined : nextPageToken });
+      setModels((current) => {
+        const combined = reset ? result.models : [...current, ...result.models];
+        return Array.from(new Map(combined.map((model) => [model.id, model])).values());
+      });
+      setNextPageToken(result.nextPageToken || null);
       setMessage(null);
-      void saveOfflineSnapshot('model-catalog', result.models).catch(() => undefined);
+      void saveOfflineSnapshot('model-catalog', reset ? result.models : [...models, ...result.models]).catch(() => undefined);
     } catch (err) {
-      const cached = await readOfflineSnapshot<ShoeModel[]>('model-catalog').catch(() => null);
+      const cached = reset ? await readOfflineSnapshot<ShoeModel[]>('model-catalog').catch(() => null) : null;
       if (cached) {
         const normalizedSearch = search.trim().toLocaleLowerCase();
         setModels(cached.filter(model => (!category || model.category === category) && (!normalizedSearch || model.name.toLocaleLowerCase().includes(normalizedSearch))));
+        setNextPageToken(null);
         setMessage('الاتصال غير متاح؛ تعرض الآن آخر نسخة محفوظة من كتالوج الموديلات على هذا الهاتف.');
         setError(null);
       } else {
@@ -45,7 +51,7 @@ export const ModelsPanel: React.FC<ModelsPanelProps> = ({ readOnly = false }) =>
     }
   };
 
-  useEffect(() => { void loadModels(); }, [search, category]);
+  useEffect(() => { setModels([]); setNextPageToken(null); void loadModels(true); }, [search, category]);
 
   const totalImageChars = useMemo(() => (form.image1.length + form.image2.length), [form.image1, form.image2]);
 
@@ -127,7 +133,8 @@ export const ModelsPanel: React.FC<ModelsPanelProps> = ({ readOnly = false }) =>
     </div>
     <div className="rounded-2xl border border-white/10 bg-[#111] p-4">
       <div className="flex flex-col sm:flex-row gap-2 mb-4"><input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="بحث باسم الموديل..." className="field flex-1" /><select value={category} onChange={(e) => setCategory(e.target.value as ShoeCategory | '')} className="field sm:w-40"><option value="">كل التصنيفات</option>{categories.map((item) => <option key={item}>{item}</option>)}</select><button onClick={() => void loadModels()} className="secondary-button">تحديث</button></div>
-      {loading ? <p className="text-center text-sm text-gray-400 py-8">جاري تحميل الموديلات...</p> : models.length === 0 ? <p className="text-center text-sm text-gray-500 py-8">لا توجد موديلات مطابقة.</p> : <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">{models.map((model) => <article key={model.id} className="rounded-xl border border-white/10 bg-[#0A0A0A] p-3"><div className="grid grid-cols-2 gap-2"><img src={model.image1} alt={model.name} onClick={() => setZoomed(model.image1)} className="h-32 w-full object-cover rounded-lg cursor-zoom-in" /><img src={model.image2} alt={model.name} onClick={() => setZoomed(model.image2)} className="h-32 w-full object-cover rounded-lg cursor-zoom-in" /></div><h4 className="mt-3 font-bold text-white">{model.name}</h4><p className="text-xs text-[#D4AF37] mt-1">{model.category}</p><p className="text-xs text-gray-500 mt-1">{model.weightMg ? `${model.weightMg} mg` : 'بدون وزن'} · {model.firstPositionMm ?? '-'} / {model.lastPositionMm ?? '-'} mm</p>{!readOnly && <div className="flex gap-2 mt-3"><button onClick={() => editModel(model)} className="secondary-button flex-1">تعديل</button><button onClick={() => void removeModel(model)} className="danger-button flex-1">حذف</button></div>}</article>)}</div>}
+      {loading && models.length === 0 ? <p className="text-center text-sm text-gray-400 py-8">جاري تحميل الموديلات...</p> : models.length === 0 ? <p className="text-center text-sm text-gray-500 py-8">لا توجد موديلات مطابقة.</p> : <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">{models.map((model) => <article key={model.id} className="rounded-xl border border-white/10 bg-[#0A0A0A] p-3"><div className="grid grid-cols-2 gap-2"><img src={model.image1} alt={model.name} onClick={() => setZoomed(model.image1)} className="h-32 w-full object-cover rounded-lg cursor-zoom-in" /><img src={model.image2} alt={model.name} onClick={() => setZoomed(model.image2)} className="h-32 w-full object-cover rounded-lg cursor-zoom-in" /></div><h4 className="mt-3 font-bold text-white">{model.name}</h4><p className="text-xs text-[#D4AF37] mt-1">{model.category}</p><p className="text-xs text-gray-500 mt-1">{model.weightMg ? `${model.weightMg} mg` : 'بدون وزن'} · {model.firstPositionMm ?? '-'} / {model.lastPositionMm ?? '-'} mm</p>{!readOnly && <div className="flex gap-2 mt-3"><button onClick={() => editModel(model)} className="secondary-button flex-1">تعديل</button><button onClick={() => void removeModel(model)} className="danger-button flex-1">حذف</button></div>}</article>)}</div>}
+      {nextPageToken && <div className="pt-4 text-center"><button disabled={loading} onClick={() => void loadModels(false)} className="secondary-button">{loading ? 'جاري التحميل...' : 'تحميل موديلات أقدم'}</button><p className="mt-2 text-xs text-gray-500">يستمر البحث عبر صفحات الكتالوج، وليس في أول 50 موديل فقط.</p></div>}
     </div>
     {zoomed && <button aria-label="إغلاق التكبير" onClick={() => setZoomed(null)} className="fixed inset-0 z-50 bg-black/90 p-6 flex items-center justify-center cursor-zoom-out"><img src={zoomed} alt="صورة مكبرة" className="max-h-full max-w-full object-contain" /></button>}
   </section>;
