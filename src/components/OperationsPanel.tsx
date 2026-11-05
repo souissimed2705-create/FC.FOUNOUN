@@ -43,6 +43,7 @@ export const OperationsPanel: React.FC<Props> = ({ initialSection, admin }) => {
   const [progressId, setProgressId] = useState('');
   const [progressQuantity, setProgressQuantity] = useState('');
   const [error, setError] = useState<string | null>(null);
+  const [modelsError, setModelsError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const [pending, setPending] = useState(0);
   const [busy, setBusy] = useState(false);
@@ -67,40 +68,65 @@ export const OperationsPanel: React.FC<Props> = ({ initialSection, admin }) => {
 
   const refresh = async () => {
     setError(null);
-    try {
-      const [w, t, m, c] = await Promise.all([listWorkers(), isResponsible ? Promise.resolve({ data: [] as TaskRecord[] }) : listTasks(), listShoeModels({ pageSize: 100 }), listMachineCycles()]);
-      const workerData = w.data || [], taskData = isResponsible ? [] : (t.data || []), modelData = m.models || [], cycleData = c.data || [];
-      setCycleNextPageToken(c.nextPageToken || null);
+    const [workersResult, tasksResult, modelsResult, cyclesResult] = await Promise.allSettled([
+      listWorkers(),
+      isResponsible ? Promise.resolve({ data: [] as TaskRecord[] }) : listTasks(),
+      // Keep the same page size used by the working Models screen.
+      listShoeModels({ pageSize: 50 }),
+      listMachineCycles()
+    ]);
+
+    const loadErrors: string[] = [];
+
+    if (workersResult.status === 'fulfilled') {
+      const workerData = workersResult.value.data || [];
       setWorkers(workerData);
       setWorkerEdits(current => Object.fromEntries(workerData.map(worker => [worker.id, current[worker.id] || { name: worker.name, phone: worker.phone || '', machineNumber: String(worker.machineNumber || ''), shift: worker.shift || 'day' }])));
-      setTasks(taskData);
-      setModels(modelData);
-      setCycles(cycleData);
-      void Promise.all([
-        saveOfflineSnapshot(`management-workers:${admin.uid}`, workerData),
-        saveOfflineSnapshot(`management-tasks:${admin.uid}`, taskData),
-        saveOfflineSnapshot(`management-models:${admin.uid}`, modelData),
-        saveOfflineSnapshot(`management-cycles:${admin.uid}`, cycleData)
-      ]).catch(() => undefined);
-    } catch (e) {
-      const [cachedWorkers, cachedTasks, cachedModels, cachedCycles] = await Promise.all([
-        readOfflineSnapshot<WorkerRecord[]>(`management-workers:${admin.uid}`).catch(() => null),
-        readOfflineSnapshot<TaskRecord[]>(`management-tasks:${admin.uid}`).catch(() => null),
-        readOfflineSnapshot<ShoeModel[]>(`management-models:${admin.uid}`).catch(() => null),
-        readOfflineSnapshot<MachineCycleRecord[]>(`management-cycles:${admin.uid}`).catch(() => null)
-      ]);
-      if (cachedWorkers || cachedTasks || cachedModels || cachedCycles) {
-        const workerData = cachedWorkers || [], taskData = cachedTasks || [];
-        setWorkers(workerData);
-        setWorkerEdits(current => Object.fromEntries(workerData.map(worker => [worker.id, current[worker.id] || { name: worker.name, phone: worker.phone || '', machineNumber: String(worker.machineNumber || ''), shift: worker.shift || 'day' }])));
-        setTasks(isResponsible ? [] : taskData); setModels(cachedModels || []); setCycles(cachedCycles || []);
-        setNotice('أنت دون اتصال؛ تعرض آخر نسخة محفوظة من بيانات الإدارة. العمليات الجديدة ستنتظر المزامنة.');
+      void saveOfflineSnapshot(`management-workers:${admin.uid}`, workerData).catch(() => undefined);
+    } else {
+      const cachedWorkers = await readOfflineSnapshot<WorkerRecord[]>(`management-workers:${admin.uid}`).catch(() => null);
+      if (cachedWorkers) {
+        setWorkers(cachedWorkers);
+        setWorkerEdits(current => Object.fromEntries(cachedWorkers.map(worker => [worker.id, current[worker.id] || { name: worker.name, phone: worker.phone || '', machineNumber: String(worker.machineNumber || ''), shift: worker.shift || 'day' }])));
       } else {
-        setError(e instanceof Error ? e.message : 'تعذر تحميل البيانات ولا توجد نسخة محفوظة.');
+        loadErrors.push(workersResult.reason instanceof Error ? workersResult.reason.message : 'تعذر تحميل قائمة العمال.');
       }
     }
-  };
 
+    if (tasksResult.status === 'fulfilled') {
+      const taskData = isResponsible ? [] : (tasksResult.value.data || []);
+      setTasks(taskData);
+      void saveOfflineSnapshot(`management-tasks:${admin.uid}`, taskData).catch(() => undefined);
+    } else {
+      const cachedTasks = await readOfflineSnapshot<TaskRecord[]>(`management-tasks:${admin.uid}`).catch(() => null);
+      if (cachedTasks) setTasks(isResponsible ? [] : cachedTasks);
+      else loadErrors.push(tasksResult.reason instanceof Error ? tasksResult.reason.message : 'تعذر تحميل أوامر الإنتاج.');
+    }
+
+    if (modelsResult.status === 'fulfilled') {
+      const modelData = modelsResult.value.models || [];
+      setModels(modelData);
+      setModelsError(null);
+      void saveOfflineSnapshot(`management-models:${admin.uid}`, modelData).catch(() => undefined);
+    } else {
+      const cachedModels = await readOfflineSnapshot<ShoeModel[]>(`management-models:${admin.uid}`).catch(() => null);
+      setModels(cachedModels || []);
+      setModelsError(modelsResult.reason instanceof Error ? modelsResult.reason.message : 'تعذر تحميل قائمة الموديلات.');
+    }
+
+    if (cyclesResult.status === 'fulfilled') {
+      const cycleData = cyclesResult.value.data || [];
+      setCycleNextPageToken(cyclesResult.value.nextPageToken || null);
+      setCycles(cycleData);
+      void saveOfflineSnapshot(`management-cycles:${admin.uid}`, cycleData).catch(() => undefined);
+    } else {
+      const cachedCycles = await readOfflineSnapshot<MachineCycleRecord[]>(`management-cycles:${admin.uid}`).catch(() => null);
+      if (cachedCycles) setCycles(cachedCycles);
+      else loadErrors.push(cyclesResult.reason instanceof Error ? cyclesResult.reason.message : 'تعذر تحميل تقارير دورات المكائن.');
+    }
+
+    setError(loadErrors.length ? loadErrors.join(' · ') : null);
+  };
 
 
   useEffect(() => {
@@ -248,7 +274,7 @@ export const OperationsPanel: React.FC<Props> = ({ initialSection, admin }) => {
       </div>)}</div>
     </div>}
 
-    {section === 'tasks' && <div className="space-y-5">
+    {section === 'tasks' && <div className="space-y-5">\n      {modelsError && <div role="alert" className="rounded-lg border border-amber-500/40 bg-amber-950/30 p-3 text-sm text-amber-200">تعذر تحديث قائمة الموديلات؛ تُعرض آخر نسخة محفوظة إن وُجدت. {modelsError}</div>}
       <div className="rounded-xl border border-[#D4AF37]/25 bg-[#0A0A0A] p-4 space-y-3">
         <h3 className="font-bold text-[#F5D77F]">{editingTaskId ? 'تعديل أمر الإنتاج' : 'إصدار أمر إنتاج جديد'}</h3>
         <form onSubmit={addTask} className="grid grid-cols-1 sm:grid-cols-2 gap-2">
