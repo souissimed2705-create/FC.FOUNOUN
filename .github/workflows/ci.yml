@@ -28,6 +28,11 @@ jobs:
           cache: npm
       - name: Install dependencies
         run: npm ci
+      - name: Dependency vulnerability report
+        shell: bash
+        run: |
+          npm audit --json > npm-audit.json || true
+          node --input-type=module -e "import fs from 'node:fs'; const audit = JSON.parse(fs.readFileSync('npm-audit.json', 'utf8')); const items = Object.entries(audit.vulnerabilities || {}).map(([name, item]) => ({ name, severity: item.severity, range: item.range, fixAvailable: item.fixAvailable, advisories: (item.via || []).map(via => typeof via === 'string' ? via : via.title) })); console.log('Dependency audit summary:', JSON.stringify(audit.metadata?.vulnerabilities || {})); for (const item of items) console.log(JSON.stringify(item));"
       - name: TypeScript check
         run: npm run lint
       - name: Unit and security tests
