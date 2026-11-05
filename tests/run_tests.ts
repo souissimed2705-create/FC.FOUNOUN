@@ -48,6 +48,8 @@ import {
   convertToFirestoreFields,
   convertFromFirestoreFields,
   resolveCycleRecordedAt,
+  computePinPbkdf2,
+  computeStoredPinHash,
 } from '../worker/worker.js';
 
 export async function runAllTests() {
@@ -107,6 +109,22 @@ export async function runAllTests() {
 
   const arWithTatweel = await normalizeModelName('مــــوديل');
   assert(arWithTatweel.normalized === 'مــــوديل', 'الحفاظ على الكشيدة والتطويل العربي دون حذف');
+
+  // 1.2 PBKDF2 PIN hashing: stay within the Cloudflare WebCrypto 100,000-iteration limit.
+  console.log('\n1.2 اختبارات تشفير PIN المتوافق مع Cloudflare WebCrypto:');
+  const pinSalt = 'fc-founoun-test-salt';
+  const pinHash = await computePinPbkdf2(pinSalt, '123456');
+  assert(/^[a-f0-9]{64}$/.test(pinHash), 'إنتاج هاش PBKDF2-SHA256 بطول 256 بت');
+  const storedV2 = { pin_algo: 'pbkdf2-sha256-v2', pin_iterations: 100000, pin_salt: pinSalt, pin_hash: pinHash };
+  const verifiedV2 = await computeStoredPinHash(storedV2, '123456', 'رمز الاختبار');
+  assert(verifiedV2 === pinHash, 'التحقق من PIN الجديد بإعداد 100000 دورة');
+  let legacyPinResetRequired = false;
+  try {
+    await computeStoredPinHash({ pin_algo: 'pbkdf2-sha256-v1', pin_salt: pinSalt, pin_hash: 'legacy' }, '123456', 'رمز الاختبار');
+  } catch (error) {
+    legacyPinResetRequired = (error as { code?: string }).code === 'pin_reset_required';
+  }
+  assert(legacyPinResetRequired, 'رفض هاش PBKDF2 القديم برسالة إعادة تعيين واضحة بدلاً من خطأ WebCrypto');
 
   // 2. Strict Base64 RFC 4648 (Imported from src/utils/imageValidator.ts)
   console.log('\n2. اختبارات التحقق الصارم من Base64 (من src/utils/imageValidator.ts):');
