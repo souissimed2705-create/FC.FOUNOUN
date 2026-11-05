@@ -3,8 +3,6 @@ import { enqueueOfflineMutation, listOfflineMutations, deleteOfflineMutation } f
 import type { OperationsResponse, ProgressPayload, TaskPayload, TaskRecord, WorkerPayload, WorkerRecord, ChatMessage, MachineCycleRecord, ManagementAccountRecord, ContactRecord } from '../types/operations';
 
 const BASE = ((import.meta.env.VITE_WORKER_URL as string | undefined) || 'https://shiny-bird-56fc.souissimed2705.workers.dev').replace(/\/$/, '');
-const QUEUE_KEY_PREFIX = 'fc-founoun-offline-operations-v2';
-function currentQueueKey() { return `${QUEUE_KEY_PREFIX}:${auth.currentUser?.uid || 'anonymous'}`; }
 
 async function token(expectedUid?: string) { const user = auth.currentUser; if (!user || (expectedUid && user.uid !== expectedUid)) throw new Error('تغير حساب الدخول؛ أُوقفت المزامنة لحماية بيانات المستخدم.'); return user.getIdToken(false); }
 async function request<T>(path: string, init: RequestInit = {}, expectedUid?: string): Promise<T> {
