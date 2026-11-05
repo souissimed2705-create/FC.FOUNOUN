@@ -1,6 +1,6 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { createPortal } from 'react-dom';
-import { Bell, Check, X } from 'lucide-react';
+import { Bell, Check, X, Volume2 } from 'lucide-react';
 import { listNotifications, markNotificationRead } from '../lib/operationsApi';
 import type { NotificationRecord } from '../types/operations';
 
@@ -8,11 +8,56 @@ export const NotificationsBell: React.FC = () => {
   const [items, setItems] = useState<NotificationRecord[]>([]);
   const [open, setOpen] = useState(false);
   const [error, setError] = useState('');
+  const [soundMode, setSoundMode] = useState<'soft' | 'bright' | 'silent'>(() => {
+    try {
+      const saved = localStorage.getItem('fc-message-sound-mode');
+      return saved === 'bright' || saved === 'silent' ? saved : 'soft';
+    } catch { return 'soft'; }
+  });
+  const seenNotificationIds = useRef<Set<string> | null>(null);
+
+  const playMessageSound = (mode: 'soft' | 'bright' = soundMode) => {
+    if (mode === 'silent') return;
+    try {
+      const AudioContextClass = window.AudioContext;
+      if (!AudioContextClass) return;
+      const context = new AudioContextClass();
+      const notes = mode === 'bright' ? [880, 1175] : [660, 784];
+      notes.forEach((frequency, index) => {
+        const oscillator = context.createOscillator();
+        const gain = context.createGain();
+        const start = context.currentTime + index * 0.16;
+        oscillator.type = 'sine';
+        oscillator.frequency.value = frequency;
+        gain.gain.setValueAtTime(0.0001, start);
+        gain.gain.exponentialRampToValueAtTime(0.12, start + 0.025);
+        gain.gain.exponentialRampToValueAtTime(0.0001, start + 0.14);
+        oscillator.connect(gain);
+        gain.connect(context.destination);
+        oscillator.start(start);
+        oscillator.stop(start + 0.15);
+      });
+      window.setTimeout(() => void context.close(), 700);
+    } catch (e) { console.warn('Message sound unavailable:', e); }
+  };
+
+  const changeSoundMode = (mode: 'soft' | 'bright' | 'silent') => {
+    setSoundMode(mode);
+    try { localStorage.setItem('fc-message-sound-mode', mode); } catch { /* device storage unavailable */ }
+    if (mode !== 'silent') playMessageSound(mode);
+  };
 
   const refresh = async () => {
     try {
       const result = await listNotifications();
-      setItems(result.data || []);
+      const nextItems = result.data || [];
+      const nextIds = new Set(nextItems.map(item => item.id));
+      if (seenNotificationIds.current) {
+        const hasNewMessage = nextItems.some(item => item.type === 'direct_message' && !seenNotificationIds.current?.has(item.id));
+        if (hasNewMessage) playMessageSound();
+      }
+      seenNotificationIds.current = nextIds;
+      setItems(nextItems);
       setError('');
     } catch (e) {
       setError(e instanceof Error ? e.message : 'تعذر تحميل الإشعارات.');
@@ -78,7 +123,7 @@ export const NotificationsBell: React.FC = () => {
             style={{ maxHeight: 'min(82dvh, 680px)' }}
           >
             <div className="flex shrink-0 items-center justify-between border-b border-white/10 p-4">
-              <h2 id="notifications-title" className="text-base font-bold text-[#F5D77F]">الإشعارات</h2>
+              <div><h2 id="notifications-title" className="text-base font-bold text-[#F5D77F]">الإشعارات</h2><div className="mt-2 flex flex-wrap items-center gap-2 text-xs"><Volume2 className="h-4 w-4 text-[#D4AF37]" /><label htmlFor="message-sound-mode" className="text-gray-300">نغمة الرسائل:</label><select id="message-sound-mode" value={soundMode} onChange={event => changeSoundMode(event.target.value as 'soft' | 'bright' | 'silent')} className="rounded-lg border border-white/15 bg-[#181818] px-2 py-1 text-gray-100"><option value="soft">هادئة</option><option value="bright">واضحة</option><option value="silent">صامت</option></select><button type="button" onClick={() => playMessageSound(soundMode === 'silent' ? 'soft' : soundMode)} className="rounded-lg border border-[#D4AF37]/30 px-2 py-1 text-[#F5D77F]">تجربة</button></div></div>
               <button
                 type="button"
                 onClick={() => setOpen(false)}
