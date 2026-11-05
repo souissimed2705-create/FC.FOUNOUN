@@ -9,3 +9,5 @@ export interface TaskPayload { title: string; description?: string; modelId?: st
 export interface ChatMessage { id: string; workerId: string; senderUid: string; senderRole: 'admin' | 'super_admin' | 'responsible' | 'worker'; recipientUid?: string; conversationId?: string; senderName: string; text: string; createdAt: string; }
 export interface ProgressPayload { quantity: number; note?: string; clientMutationId: string; }
 export interface OperationsResponse<T> { success: boolean; data: T; nextPageToken?: string | null; message?: string; }
+
+export interface NotificationRecord { id: string; type: string; title: string; body: string; relatedId?: string; createdAt: string; readAt?: string | null; }
