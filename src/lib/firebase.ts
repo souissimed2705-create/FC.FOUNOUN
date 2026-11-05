@@ -1,6 +1,7 @@
 import { initializeApp, getApps, getApp, FirebaseApp } from 'firebase/app';
 import { getAuth, Auth } from 'firebase/auth';
 import { getFirestore, Firestore, doc, getDoc } from 'firebase/firestore';
+import { getMissingFirebaseConfig } from '../utils/firebaseConfig';
 
 /**
  * Official Firebase Web Client Configuration
@@ -19,10 +20,7 @@ const firebaseConfig = {
   appId: (import.meta.env.VITE_FIREBASE_APP_ID || '').trim(),
 };
 
-const missingFirebaseConfig: string[] = [];
-if (!/^AIza[0-9A-Za-z_-]{20,}$/.test(firebaseConfig.apiKey)) missingFirebaseConfig.push('VITE_FIREBASE_API_KEY');
-if (!/^\\d+$/.test(firebaseConfig.messagingSenderId)) missingFirebaseConfig.push('VITE_FIREBASE_MESSAGING_SENDER_ID');
-if (!/^1:\\d+:web:[0-9a-f]+$/i.test(firebaseConfig.appId)) missingFirebaseConfig.push('VITE_FIREBASE_APP_ID');
+const missingFirebaseConfig = getMissingFirebaseConfig(firebaseConfig);
 
 // Initialize Firebase App safely (singleton pattern)
 let app: FirebaseApp;
