@@ -1389,6 +1389,16 @@ async function handleWorkerTaskStatus(request, taskId, workerId, projectId, acce
   return jsonResponse({ success: true, task: sanitizeResourceOutput(record, 'tasks') }, 200, corsHeaders);
 }
 
+export function assertWorkerTaskProgressAccess(task, workerId) {
+  if (!task || task.assignedWorkerId !== workerId) {
+    throw createHttpError('لا يمكنك تحديث مهمة غير مسندة إليك', 403, 'task_not_assigned');
+  }
+  // Do not reject completed/cancelled status here: handleTaskProgress must
+  // first check the idempotency ledger so a retry of an already committed
+  // mutation can safely return duplicate success after a lost response.
+  return true;
+}
+
 async function handleWorkerTaskProgress(request, taskId, workerId, projectId, accessToken, corsHeaders) {
   const workerDoc = await getFirestoreDoc(projectId, accessToken, `workers/${workerId}`);
   if (!workerDoc || convertFromFirestoreFields(workerDoc.fields || {}).status !== 'active') {
@@ -1397,8 +1407,7 @@ async function handleWorkerTaskProgress(request, taskId, workerId, projectId, ac
   const taskDoc = await getFirestoreDoc(projectId, accessToken, `tasks/${taskId}`);
   if (!taskDoc) throw createHttpError('المهمة غير موجودة', 404, 'task_not_found');
   const task = convertFromFirestoreFields(taskDoc.fields || {});
-  if (task.assignedWorkerId !== workerId) throw createHttpError('لا يمكنك تحديث مهمة غير مسندة إليك', 403, 'task_not_assigned');
-  if (task.status === 'cancelled' || task.status === 'completed') throw createHttpError('هذه المهمة مغلقة', 409, 'task_closed');
+  assertWorkerTaskProgressAccess(task, workerId);
   return handleTaskProgress(request, taskId, workerId, projectId, accessToken, corsHeaders, workerId);
 }
 
