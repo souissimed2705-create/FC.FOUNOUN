@@ -11,12 +11,11 @@ export const NotificationsBell: React.FC = () => {
   const [soundMode, setSoundMode] = useState<'soft' | 'bright' | 'strong' | 'silent'>(() => {
     try {
       const saved = localStorage.getItem('fc-message-sound-mode');
-      return saved === 'soft' || saved === 'bright' || saved === 'silent' ? saved : 'strong';
+      return saved === 'silent' ? 'silent' : 'strong';
     } catch { return 'strong'; }
   });
   const seenNotificationIds = useRef<Set<string> | null>(null);
   const audioContextRef = useRef<AudioContext | null>(null);
-  const audioUnlockedRef = useRef(false);
 
   const unlockMessageAudio = async () => {
     try {
@@ -26,8 +25,7 @@ export const NotificationsBell: React.FC = () => {
         audioContextRef.current = new AudioContextClass();
       }
       if (audioContextRef.current.state !== 'running') await audioContextRef.current.resume();
-      audioUnlockedRef.current = audioContextRef.current.state === 'running';
-    } catch (e) { console.warn('Message audio could not be unlocked:', e); }
+     } catch (e) { console.warn('Message audio could not be unlocked:', e); }
   };
 
   const playMessageSound = async (mode: 'soft' | 'bright' | 'strong' = soundMode === 'silent' ? 'strong' : soundMode) => {
