@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { Home, ClipboardList, Crown, LogOut, Package, ShieldCheck, Users, UserCog, MessageCircle } from 'lucide-react';
 import { UserProfile } from '../lib/firebase';
 import { ModelsPanel } from './ModelsPanel';
@@ -11,6 +11,15 @@ type Page = 'home' | 'models' | 'tasks' | 'supervisor' | 'workers' | 'accounts' 
 
 export const AdminDashboard: React.FC<AdminDashboardProps> = ({ admin, onLogout, isLoggingOut }) => {
   const [page, setPage] = useState<Page>('home');
+  useEffect(() => {
+    window.history.pushState({ fcFounounPage: 'admin', page: 'home' }, '');
+    const handleBack = (event: PopStateEvent) => {
+      if (event.state?.fcFounounPage === 'admin') setPage(event.state.page as Page);
+      else setPage('home');
+    };
+    window.addEventListener('popstate', handleBack);
+    return () => window.removeEventListener('popstate', handleBack);
+  }, []);
   const isSupervisor = admin.role === 'super_admin';
   const canManageWorkers = ['super_admin', 'admin', 'responsible'].includes(admin.role);
   const roleName = isSupervisor ? 'المشرف العام' : admin.role === 'responsible' ? 'المسؤول' : 'المدير العام';
@@ -18,8 +27,14 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ admin, onLogout,
     ? 'أهلاً بك. أشرف على العمال ورموز الدخول وتابع سير الإنتاج.'
     : admin.role === 'responsible' ? 'أهلاً بك. أدر مشرفي العمال والمكائن والورديات والموديلات وتابع تقارير دورات المكائن.' : 'أهلاً بك. أشرف على سير الإنتاج وأدر العمليات المسموح بها.';
 
-  const go = (next: Page) => setPage(next);
-  const backHome = () => setPage('home');
+  const go = (next: Page) => {
+    window.history.pushState({ fcFounounPage: 'admin', page: next }, '');
+    setPage(next);
+  };
+  const backHome = () => {
+    if (page !== 'home' && window.history.state?.fcFounounPage === 'admin') window.history.back();
+    else setPage('home');
+  };
 
   const pageTitle: Record<Page, string> = {
     home: 'الرئيسية',
