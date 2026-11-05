@@ -40,22 +40,30 @@ export const NotificationsBell: React.FC = () => {
       // Distinct, rising five-note alert; keep it short enough not to become intrusive.
       const notes = mode === 'strong' ? [784, 988, 1175, 988, 1568] : mode === 'bright' ? [880, 1175, 1397] : [660, 784];
       const noteGap = mode === 'strong' ? 0.19 : 0.16;
-      notes.forEach((frequency, index) => {
-        const oscillator = context.createOscillator();
-        const gain = context.createGain();
-        const start = context.currentTime + index * noteGap;
-        const duration = mode === 'strong' ? 0.28 : 0.18;
-        oscillator.type = mode === 'strong' ? 'square' : 'sine';
-        oscillator.frequency.setValueAtTime(frequency, start);
-        gain.gain.setValueAtTime(0.0001, start);
-        gain.gain.exponentialRampToValueAtTime(mode === 'strong' ? 0.82 : 0.32, start + 0.025);
-        gain.gain.exponentialRampToValueAtTime(0.0001, start + duration);
-        oscillator.connect(gain);
-        gain.connect(context.destination);
-        oscillator.start(start);
-        oscillator.stop(start + duration + 0.01);
-      });
-      if (mode === 'strong' && typeof navigator.vibrate === 'function') navigator.vibrate([220, 80, 220, 80, 320]);
+      const repeatCount = 3;
+      const duration = mode === 'strong' ? 0.28 : 0.18;
+      const melodyDuration = (notes.length - 1) * noteGap + duration;
+      const repeatGap = 0.35;
+      for (let repeat = 0; repeat < repeatCount; repeat++) {
+        const repeatStart = context.currentTime + repeat * (melodyDuration + repeatGap);
+        notes.forEach((frequency, index) => {
+          const oscillator = context.createOscillator();
+          const gain = context.createGain();
+          const start = repeatStart + index * noteGap;
+          oscillator.type = mode === 'strong' ? 'square' : 'sine';
+          oscillator.frequency.setValueAtTime(frequency, start);
+          gain.gain.setValueAtTime(0.0001, start);
+          gain.gain.exponentialRampToValueAtTime(mode === 'strong' ? 0.82 : 0.32, start + 0.025);
+          gain.gain.exponentialRampToValueAtTime(0.0001, start + duration);
+          oscillator.connect(gain);
+          gain.connect(context.destination);
+          oscillator.start(start);
+          oscillator.stop(start + duration + 0.01);
+        });
+      }
+      if (mode === 'strong' && typeof navigator.vibrate === 'function') {
+        navigator.vibrate([220, 80, 220, 80, 320, 350, 220, 80, 220, 80, 320, 350, 220, 80, 220, 80, 320]);
+      }
     } catch (e) { console.warn('Message sound unavailable:', e); }
   };
 
