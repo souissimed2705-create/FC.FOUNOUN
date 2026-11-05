@@ -11,6 +11,7 @@
 
 import { normalizeModelName } from '../src/utils/modelNormalization';
 import { normalizeMutationInit } from '../src/utils/offlineQueue';
+import { getMissingFirebaseConfig } from '../src/utils/firebaseConfig';
 import {
   validateDualImageLimits,
   MAX_IMAGE_CHARS,
@@ -84,6 +85,24 @@ export async function runAllTests() {
       assert(err.status === expectedStatus && err.code === expectedCode, testName, 'رمز الرفض أو الحالة غير صحيح');
     }
   }
+
+  // Firebase Web config validation must accept real Firebase sender IDs and app IDs.
+  console.log('0. اختبارات التحقق من إعدادات Firebase:');
+  const validFirebaseConfig = getMissingFirebaseConfig({
+    apiKey: 'AIzaSyA12345678901234567890123456789012',
+    messagingSenderId: '761551234567',
+    appId: '1:761551234567:web:abcdef0123456789',
+  });
+  assert(validFirebaseConfig.length === 0, 'قبول معرّف المرسل ومعرّف تطبيق Firebase الصحيحين');
+  const invalidFirebaseConfig = getMissingFirebaseConfig({
+    apiKey: 'invalid',
+    messagingSenderId: 'not-numeric',
+    appId: 'wrong-app-id',
+  });
+  assert(
+    invalidFirebaseConfig.join(',') === 'VITE_FIREBASE_API_KEY,VITE_FIREBASE_MESSAGING_SENDER_ID,VITE_FIREBASE_APP_ID',
+    'رفض إعدادات Firebase غير الصالحة مع تسمية المتغيرات الناقصة بدقة'
+  );
 
   // 1. Test Name Normalization (casing and whitespace only, preserving Tashkeel & Tatweel)
   console.log('1. اختبارات توحيد الأسماء وحساب SHA-256 (من src/utils/modelNormalization.ts):');
