@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { Bell, Check } from 'lucide-react';
 import { listNotifications, markNotificationRead } from '../lib/operationsApi';
 import type { NotificationRecord } from '../types/operations';
@@ -11,6 +11,7 @@ export const NotificationsBell: React.FC = () => {
     try { const result = await listNotifications(); setItems(result.data || []); setError(''); }
     catch (e) { setError(e instanceof Error ? e.message : 'تعذر تحميل الإشعارات.'); }
   };
+  useEffect(() => { void refresh(); const timer = window.setInterval(() => void refresh(), 15000); return () => window.clearInterval(timer); }, []);
   const markRead = async (id: string) => {
     try { await markNotificationRead(id); setItems(old => old.map(x => x.id === id ? { ...x, readAt: new Date().toISOString() } : x)); }
     catch (e) { setError(e instanceof Error ? e.message : 'تعذر تحديث الإشعار.'); }
