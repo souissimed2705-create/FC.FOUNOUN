@@ -1403,7 +1403,7 @@ async function handleListCycles(request, projectId, accessToken, corsHeaders) {
   const pageToken = url.searchParams.get('pageToken') || null;
   // Fetch a bounded page, newest machine-cycle reports first. The client can
   // request older pages without loading an ever-growing collection at once.
-  const result = await listFirestoreDocs(projectId, accessToken, 'machine_cycles', pageSize, pageToken, '__name__ desc', ['id', 'machineNumber', 'shift', 'date', 'count', 'workerId', 'workerName', 'recordedAt', 'receivedAt', 'hasPhoto']);
+  const result = await listFirestoreDocs(projectId, accessToken, 'machine_cycles', pageSize, pageToken, null, ['id', 'machineNumber', 'shift', 'date', 'count', 'workerId', 'workerName', 'recordedAt', 'receivedAt', 'hasPhoto']);
   const data = result.documents.map(doc => convertFromFirestoreFields(doc.fields || {}))
     .sort((a, b) => String(b.recordedAt || '').localeCompare(String(a.recordedAt || '')))
     .map(report => ({ ...report, hasPhoto: report.hasPhoto !== false }));
