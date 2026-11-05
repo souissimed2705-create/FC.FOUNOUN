@@ -45,7 +45,7 @@ function transactionDone(tx: IDBTransaction): Promise<void> {
   });
 }
 
-function normalizeMutationInit(init: RequestInit): OfflineMutationInit {
+export function normalizeMutationInit(init: RequestInit): OfflineMutationInit {
   if (init.body !== undefined && init.body !== null && typeof init.body !== 'string') {
     throw new Error('نوع بيانات العملية غير قابل للحفظ دون اتصال.');
   }
