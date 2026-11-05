@@ -44,7 +44,7 @@ export const OperationsPanel: React.FC<Props> = ({ initialSection, admin }) => {
   const [progressQuantity, setProgressQuantity] = useState('');
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
-  const [pending, setPending] = useState(queuedMutationCount());
+  const [pending, setPending] = useState(0);
   const [busy, setBusy] = useState(false);
 
   const loadMoreCycles = async () => {
@@ -104,15 +104,18 @@ export const OperationsPanel: React.FC<Props> = ({ initialSection, admin }) => {
 
 
   useEffect(() => {
+    let active = true;
     const handler = async () => {
       await flushQueuedMutations();
-      setPending(queuedMutationCount());
+      const count = await queuedMutationCount().catch(() => 0);
+      if (!active) return;
+      setPending(count);
       void refresh();
     };
     // Resume saved management operations after a reload as soon as the app is online.
     void handler();
     window.addEventListener('online', handler);
-    return () => window.removeEventListener('online', handler);
+    return () => { active = false; window.removeEventListener('online', handler); };
   }, []);
 
 
@@ -122,8 +125,8 @@ export const OperationsPanel: React.FC<Props> = ({ initialSection, admin }) => {
     try {
       if (!navigator.onLine && fallback) {
         const { queueMutation } = await import('../lib/operationsApi');
-        queueMutation(fallback.path, fallback.init);
-        setPending(queuedMutationCount());
+        await queueMutation(fallback.path, fallback.init);
+        setPending(await queuedMutationCount());
         setNotice('لا يوجد اتصال؛ حُفظت العملية وستتم مزامنتها عند عودة الاتصال.');
         return;
       }
