@@ -185,7 +185,8 @@ export const OperationsPanel: React.FC<Props> = ({ initialSection, admin }) => {
     e.preventDefault();
     // Capture the submitted value once; do not clear the controlled input until
     // the server confirms the create (or the offline queue confirms it saved).
-    const workerName = String(name ?? '').trim();
+    const formData = new FormData(e.currentTarget);
+    const workerName = String(formData.get('workerName') ?? name ?? '').trim();
     if (!workerName) { setError('اسم العامل مطلوب.'); return; }
     if (isSupervisor && !/^\d{6}$/.test(newWorkerPin)) { setError('عيّن للعامل PIN من 6 أرقام قبل إنشاء الحساب.'); return; }
     if (isSupervisor && !navigator.onLine) { setError('إنشاء العامل مع تعيين PIN يتطلب اتصالاً بالإنترنت لحماية الرمز السري وعدم حفظه مكشوفاً على الهاتف.'); return; }
@@ -255,7 +256,7 @@ export const OperationsPanel: React.FC<Props> = ({ initialSection, admin }) => {
     {section === 'workers' && canManageWorkers && <div className="space-y-4">
       <h3 className="font-bold text-[#F5D77F]">إدارة العمال ورموز الدخول</h3>
       <form onSubmit={addWorker} className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-        <label className="block text-xs text-gray-300">اسم مشرف العمال<input className="field mt-1 w-full" placeholder="اكتب اسم العامل" value={name} onChange={e => { setName(e.target.value); if (e.target.value.trim()) setError(null); }} /></label>
+        <label className="block text-xs text-gray-300">اسم مشرف العمال<input name="workerName" autoComplete="off" className="field mt-1 w-full" placeholder="اكتب اسم مشرف العمال" value={name} onChange={e => { setName(e.target.value); if (e.target.value.trim()) setError(null); }} /></label>
         {!isResponsible && <label className="block text-xs text-gray-300">رقم الهاتف (اختياري)<input className="field mt-1 w-full" placeholder="رقم الهاتف" value={phone} onChange={e => setPhone(e.target.value)} /></label>}
         <label className="block text-xs text-gray-300">تعيين المكينة<select className="field mt-1 w-full" value={machineNumber} onChange={e => setMachineNumber(e.target.value as '1' | '2' | '3')}><option value="1">المكينة 1</option><option value="2">المكينة 2</option><option value="3">المكينة 3</option></select></label>
         <label className="block text-xs text-gray-300">تعيين الوردية<select className="field mt-1 w-full" value={shift} onChange={e => setShift(e.target.value as 'day' | 'night')}><option value="day">الوردية النهارية</option><option value="night">الوردية الليلية</option></select></label>
