@@ -603,6 +603,18 @@ async function handleUpdateResource(request, resource, id, callerUid, projectId,
     }
   }
   await commitFirestoreTransaction(projectId, accessToken, null, writes);
+  if (resource === 'tasks') {
+    const previousWorkerId = current.assignedWorkerId;
+    const nextWorkerId = record.assignedWorkerId;
+    if (nextWorkerId && nextWorkerId !== previousWorkerId) {
+      await createUserNotification(nextWorkerId, 'task_assigned', 'أمر إنتاج جديد', `تم إسناد ${record.title} إليك بكمية ${record.targetQuantity}.`, id, projectId, accessToken);
+      if (previousWorkerId) {
+        await createUserNotification(previousWorkerId, 'task_reassigned', 'تغيير إسناد أمر الإنتاج', `تم نقل أمر الإنتاج ${current.title || ''} إلى عامل آخر.`, id, projectId, accessToken);
+      }
+    } else if (nextWorkerId && ['title', 'description', 'targetQuantity', 'dueDate', 'modelId', 'status'].some(key => changes[key] !== undefined && changes[key] !== current[key])) {
+      await createUserNotification(nextWorkerId, 'task_updated', 'تم تحديث أمر الإنتاج', `تم تحديث بيانات ${record.title || 'أمر الإنتاج'}. الكمية المطلوبة: ${record.targetQuantity}.`, id, projectId, accessToken);
+    }
+  }
   const responseRecord = resource === 'workers' ? sanitizeWorkerOutputForRole(record, callerRole) : sanitizeResourceOutput(record, resource);
   return jsonResponse({ success: true, [resource === 'workers' ? 'worker' : 'task']: responseRecord }, 200, corsHeaders);
 }
@@ -1237,12 +1249,36 @@ async function createUserNotification(recipientUid, type, title, body, relatedId
   }
 }
 
+export function buildNotificationQuery(recipientUid) {
+  if (typeof recipientUid !== 'string' || !/^[A-Za-z0-9_-]{3,128}$/.test(recipientUid)) {
+    throw createHttpError('معرّف مستلم الإشعار غير صالح', 400, 'invalid_notification_recipient');
+  }
+  return {
+    structuredQuery: {
+      from: [{ collectionId: 'notifications' }],
+      where: {
+        fieldFilter: {
+          field: { fieldPath: 'recipientUid' },
+          op: 'EQUAL',
+          value: { stringValue: recipientUid }
+        }
+      },
+      limit: 200
+    }
+  };
+}
+
 async function handleNotifications(request, notificationId, callerUid, projectId, accessToken, corsHeaders) {
   if (!notificationId) {
-    const rows = await listFirestoreDocs(projectId, accessToken, 'notifications', 200, null, null,
-      ['id', 'recipientUid', 'type', 'title', 'body', 'relatedId', 'createdAt', 'readAt']);
-    const data = rows.documents
-      .map(doc => convertFromFirestoreFields(doc.fields || {}))
+    const url = `${FIRESTORE_BASE_URL}/${projectId}/databases/(default)/documents:runQuery`;
+    const response = await fetch(url, {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${accessToken}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify(buildNotificationQuery(callerUid))
+    });
+    if (!response.ok) throw createHttpError('تعذر تحميل الإشعارات', 500, 'notifications_read_failed');
+    const rows = await response.json();
+    const data = rows.filter(row => row.document).map(row => convertFromFirestoreFields(row.document.fields || {}))
       .filter(item => item.recipientUid === callerUid)
       .sort((a, b) => String(b.createdAt || '').localeCompare(String(a.createdAt || '')))
       .slice(0, 50);
@@ -1515,6 +1551,11 @@ async function handleWorkerTaskStatus(request, taskId, workerId, projectId, acce
     },
     currentDocument: { updateTime: taskDoc.updateTime }
   }]);
+  if (task.createdBy && task.createdBy !== workerId) {
+    const worker = convertFromFirestoreFields(workerDoc.fields || {});
+    const statusLabel = payload.status === 'pending' ? 'علّق' : 'استأنف';
+    await createUserNotification(task.createdBy, 'task_status', 'تحديث حالة أمر الإنتاج', `قام ${worker.name || 'العامل'} بــ${statusLabel} المهمة ${task.title || ''}.`, taskId, projectId, accessToken);
+  }
   return jsonResponse({ success: true, task: sanitizeResourceOutput(record, 'tasks') }, 200, corsHeaders);
 }
 
