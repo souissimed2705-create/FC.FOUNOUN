@@ -1,0 +1,41 @@
+name: Regenerate Bun lockfile
+
+on:
+  push:
+    branches:
+      - fix/cloudflare-bun-lockfile
+
+permissions:
+  contents: write
+
+jobs:
+  regenerate:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repair branch
+        uses: actions/checkout@v4
+        with:
+          ref: fix/cloudflare-bun-lockfile
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Install matching Bun version
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.4.3
+
+      - name: Regenerate and verify lockfile
+        run: |
+          bun install --save-text-lockfile
+          bun install --frozen-lockfile
+
+      - name: Commit regenerated lockfile
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add bun.lock
+          if git diff --cached --quiet; then
+            echo "bun.lock is already consistent"
+          else
+            git commit -m "fix: regenerate Bun lockfile"
+            git push origin fix/cloudflare-bun-lockfile
+          fi
