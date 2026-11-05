@@ -50,6 +50,7 @@ import {
   resolveCycleRecordedAt,
   computePinPbkdf2,
   computeStoredPinHash,
+  assertWorkerTaskProgressAccess,
 } from '../worker/worker.js';
 
 export async function runAllTests() {
@@ -446,6 +447,16 @@ export async function runAllTests() {
   const reuseWorkerSlot: any = buildWorkerMachineReservationWrite('test-project', 'wkr_second', 1, 'day', inactiveWorkerSlot, true);
   assert(reuseWorkerSlot.currentDocument.updateTime === inactiveWorkerSlot.updateTime,
     'السماح بإعادة استخدام حجز محرر مع شرط updateTime');
+
+  // A worker retry must reach the idempotency ledger even after the task was completed by that same mutation.
+  assert(assertWorkerTaskProgressAccess({ assignedWorkerId: 'worker_1', status: 'completed' }, 'worker_1') === true,
+    'السماح لطلب الإنجاز المكرر بالوصول إلى سجل منع التكرار حتى بعد اكتمال المهمة');
+  assertThrowsWithCode(
+    () => assertWorkerTaskProgressAccess({ assignedWorkerId: 'worker_2', status: 'completed' }, 'worker_1'),
+    'task_not_assigned',
+    'منع العامل من إرسال إنجاز لمهمة غير مسندة إليه حتى عند إعادة المحاولة',
+    403
+  );
 
   // 9. Worker account freeze is reversible; the record is retained, never hard-deleted.
   console.log('\n9. اختبارات تجميد حساب العامل دون حذفه:');
