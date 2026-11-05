@@ -2673,8 +2673,11 @@ async function listFirestoreDocs(projectId, accessToken, collection, pageSize, p
     const providerMessage = String(data?.error?.message || responseText || 'No provider details').slice(0, 500);
     console.error('[Firestore collection read failed]', { collection, httpStatus: resp.status, providerCode, providerMessage });
     const isPermissionError = resp.status === 401 || resp.status === 403;
+    const safeProviderDetail = collection === 'machine_cycles'
+      ? ` — تفاصيل Firestore: ${providerMessage}`
+      : '';
     throw createHttpError(
-      `فشل قراءة قائمة الموديلات من Firestore (HTTP ${resp.status} - ${providerCode})`,
+      `فشل قراءة بيانات المجموعة ${collection} من Firestore (HTTP ${resp.status} - ${providerCode})${safeProviderDetail}`,
       isPermissionError ? 403 : 500,
       `collection_read_failed_${providerCode.toLowerCase()}`
     );
