@@ -932,6 +932,49 @@ async function handleFreezeManagementAccount(uid, callerUid, projectId, accessTo
   return jsonResponse({ success: true, data: { uid, status: 'inactive', frozen: true } }, 200, corsHeaders);
 }
 
+export function buildLoginAttemptRecord(identityField, identity, previous = {}, nowMs = Date.now(), succeeded = false) {
+  if (!['uid', 'workerId'].includes(identityField) || typeof identity !== 'string' || !identity) {
+    throw createHttpError('معرّف حساب تسجيل الدخول غير صالح', 400, 'invalid_login_identity');
+  }
+  if (Number(previous.lockedUntil || 0) > nowMs) {
+    throw createHttpError('تم إيقاف محاولة الدخول مؤقتاً. حاول بعد 15 دقيقة.', 429, 'login_locked');
+  }
+  const updatedAt = new Date(nowMs).toISOString();
+  if (succeeded) return { [identityField]: identity, count: 0, lockedUntil: 0, updatedAt };
+  const previousCount = Number(previous.count || 0);
+  const count = Number.isSafeInteger(previousCount) && previousCount > 0 ? previousCount + 1 : 1;
+  const lockedUntil = count >= 5 ? nowMs + 15 * 60 * 1000 : 0;
+  return { [identityField]: identity, count: lockedUntil ? 0 : count, lockedUntil, updatedAt };
+}
+
+async function persistLoginAttempt(projectId, accessToken, collection, id, identityField, identity, succeeded) {
+  const path = `${collection}/${id}`;
+  for (let attempt = 0; attempt < 8; attempt++) {
+    const tx = await beginFirestoreTransaction(projectId, accessToken);
+    let committed = false;
+    try {
+      const doc = await getFirestoreDoc(projectId, accessToken, path, tx.transaction);
+      const previous = doc ? convertFromFirestoreFields(doc.fields || {}) : {};
+      const record = buildLoginAttemptRecord(identityField, identity, previous, Date.now(), succeeded);
+      const write = {
+        update: {
+          name: `projects/${projectId}/databases/(default)/documents/${path}`,
+          fields: convertToFirestoreFields(record)
+        }
+      };
+      if (!doc) write.currentDocument = { exists: false };
+      await commitFirestoreTransaction(projectId, accessToken, tx.transaction, [write]);
+      committed = true;
+      return record;
+    } catch (err) {
+      if (!committed && tx?.transaction) await rollbackFirestoreTransaction(projectId, accessToken, tx.transaction).catch(() => {});
+      if (err?.code === 'conflict' && attempt < 7) continue;
+      throw err;
+    }
+  }
+  throw createHttpError('تعذر تحديث عداد محاولات الدخول بسبب طلبات متزامنة؛ حاول مجدداً', 503, 'login_attempt_contention');
+}
+
 async function handleManagementLogin(request, env, projectId, accessToken, corsHeaders) {
   const payload = await parseJsonBody(request);
   const name = typeof payload?.name === 'string' ? payload.name.trim() : '';
@@ -950,25 +993,15 @@ async function handleManagementLogin(request, env, projectId, accessToken, corsH
   const codeDoc = await getFirestoreDoc(projectId, accessToken, `management_codes/${uid}`);
   if (!codeDoc) throw createHttpError('لم يعيّن المشرف العام كود دخول لهذا الحساب بعد', 403, 'management_code_missing');
   const codeRecord = convertFromFirestoreFields(codeDoc.fields || {});
-  const attemptsPath = `management_auth_attempts/${uid}`;
-  const attemptsDoc = await getFirestoreDoc(projectId, accessToken, attemptsPath);
+  const attemptsDoc = await getFirestoreDoc(projectId, accessToken, `management_auth_attempts/${uid}`);
   const attempts = attemptsDoc ? convertFromFirestoreFields(attemptsDoc.fields || {}) : {};
-  const now = Date.now();
-  if (Number(attempts.lockedUntil || 0) > now) throw createHttpError('تم إيقاف محاولة الدخول مؤقتاً. حاول بعد 15 دقيقة.', 429, 'management_login_locked');
+  if (Number(attempts.lockedUntil || 0) > Date.now()) throw createHttpError('تم إيقاف محاولة الدخول مؤقتاً. حاول بعد 15 دقيقة.', 429, 'management_login_locked');
   const suppliedHash = await computeStoredPinHash(codeRecord, code, 'رمز حساب المسؤول');
   if (suppliedHash !== codeRecord.pin_hash) {
-    const count = Number(attempts.count || 0) + 1;
-    const lockedUntil = count >= 5 ? now + 15 * 60 * 1000 : 0;
-    const record = { uid, count: lockedUntil ? 0 : count, lockedUntil, updatedAt: new Date().toISOString() };
-    const write = { update: { name: `projects/${projectId}/databases/(default)/documents/${attemptsPath}`, fields: convertToFirestoreFields(record) } };
-    write.currentDocument = attemptsDoc?.updateTime ? { updateTime: attemptsDoc.updateTime } : { exists: false };
-    await commitFirestoreTransaction(projectId, accessToken, null, [write]);
+    await persistLoginAttempt(projectId, accessToken, 'management_auth_attempts', uid, 'uid', uid, false);
     throw createHttpError('الاسم أو الكود السري غير صحيح', 401, 'invalid_management_credentials');
   }
-  const reset = { uid, count: 0, lockedUntil: 0, updatedAt: new Date().toISOString() };
-  const resetWrite = { update: { name: `projects/${projectId}/databases/(default)/documents/${attemptsPath}`, fields: convertToFirestoreFields(reset) } };
-  resetWrite.currentDocument = attemptsDoc?.updateTime ? { updateTime: attemptsDoc.updateTime } : { exists: false };
-  await commitFirestoreTransaction(projectId, accessToken, null, [resetWrite]);
+  await persistLoginAttempt(projectId, accessToken, 'management_auth_attempts', uid, 'uid', uid, true);
   const displayName = String(user.displayName || user.name || name);
   const customToken = await createFirebaseCustomToken(env, uid, displayName, role);
   return jsonResponse({ success: true, customToken, user: { uid, displayName, role } }, 200, corsHeaders);
@@ -993,30 +1026,19 @@ async function handleWorkerLogin(request, env, projectId, accessToken, corsHeade
   const pinRecord = convertFromFirestoreFields(pinDoc.fields || {});
   if (worker.status !== 'active') throw createHttpError('حساب العامل غير نشط', 403, 'worker_inactive');
 
-  const attemptsPath = `worker_auth_attempts/${workerId}`;
-  const attemptsDoc = await getFirestoreDoc(projectId, accessToken, attemptsPath);
+  const attemptsDoc = await getFirestoreDoc(projectId, accessToken, `worker_auth_attempts/${workerId}`);
   const attempts = attemptsDoc ? convertFromFirestoreFields(attemptsDoc.fields || {}) : {};
-  const now = Date.now();
-  if (Number(attempts.lockedUntil || 0) > now) {
+  if (Number(attempts.lockedUntil || 0) > Date.now()) {
     throw createHttpError('تم إيقاف محاولة الدخول مؤقتاً. حاول بعد 15 دقيقة.', 429, 'worker_login_locked');
   }
 
   const suppliedHash = await computeStoredPinHash(pinRecord, pin, 'رمز مشرف العمال');
   if (suppliedHash !== pinRecord.pin_hash) {
-    const count = Number(attempts.count || 0) + 1;
-    const lockedUntil = count >= 5 ? now + 15 * 60 * 1000 : 0;
-    const attemptRecord = { workerId, count: lockedUntil ? 0 : count, lockedUntil, updatedAt: new Date().toISOString() };
-    const write = { update: { name: `projects/${projectId}/databases/(default)/documents/${attemptsPath}`, fields: convertToFirestoreFields(attemptRecord) } };
-    if (attemptsDoc?.updateTime) write.currentDocument = { updateTime: attemptsDoc.updateTime };
-    else write.currentDocument = { exists: false };
-    await commitFirestoreTransaction(projectId, accessToken, null, [write]);
+    await persistLoginAttempt(projectId, accessToken, 'worker_auth_attempts', workerId, 'workerId', workerId, false);
     throw createHttpError('بيانات العامل أو PIN غير صحيحة', 401, 'invalid_worker_credentials');
   }
 
-  const resetWrite = { update: { name: `projects/${projectId}/databases/(default)/documents/${attemptsPath}`, fields: convertToFirestoreFields({ workerId, count: 0, lockedUntil: 0, updatedAt: new Date().toISOString() }) } };
-  if (attemptsDoc?.updateTime) resetWrite.currentDocument = { updateTime: attemptsDoc.updateTime };
-  else resetWrite.currentDocument = { exists: false };
-  await commitFirestoreTransaction(projectId, accessToken, null, [resetWrite]);
+  await persistLoginAttempt(projectId, accessToken, 'worker_auth_attempts', workerId, 'workerId', workerId, true);
 
   const customToken = await createFirebaseCustomToken(env, workerId, worker.name);
   return jsonResponse({ success: true, customToken, worker: { id: workerId, name: worker.name } }, 200, corsHeaders);
@@ -1250,6 +1272,42 @@ async function handleDirectMessages(request, otherUid, callerUid, callerRole, pr
   return jsonResponse({ success: true, data: message }, 201, corsHeaders);
 }
 
+export function getCycleReportWriteDecision(previous, incoming) {
+  if (!previous || typeof previous !== 'object') return 'write';
+
+  const previousTime = Date.parse(previous.recordedAt || '');
+  const incomingTime = Date.parse(incoming.recordedAt || '');
+  if (!Number.isFinite(incomingTime)) {
+    throw createHttpError('وقت تسجيل التقرير غير صالح', 400, 'invalid_cycle_recorded_at');
+  }
+
+  // Legacy reports without a valid recordedAt can still be updated.
+  if (!Number.isFinite(previousTime)) return 'write';
+
+  if (previousTime > incomingTime) {
+    throw createHttpError(
+      'يوجد تقرير أحدث محفوظ لهذا اليوم؛ رُفض التقرير القديم القادم من المزامنة',
+      409,
+      'stale_cycle_report'
+    );
+  }
+
+  if (previousTime === incomingTime) {
+    const isSameSubmission =
+      previous.workerId === incoming.workerId &&
+      previous.count === incoming.count &&
+      previous.photo === incoming.photo;
+    if (isSameSubmission) return 'duplicate';
+    throw createHttpError(
+      'يوجد تقرير مختلف مسجل بنفس وقت التسجيل؛ لم يتم استبدال التقرير المحفوظ',
+      409,
+      'cycle_report_timestamp_conflict'
+    );
+  }
+
+  return 'write';
+}
+
 export function resolveCycleRecordedAt(clientRecordedAt, serverNow = new Date()) {
   if (clientRecordedAt === undefined || clientRecordedAt === null || clientRecordedAt === '') {
     return serverNow.toISOString();
@@ -1305,9 +1363,15 @@ async function handleWorkerCycles(request, workerId, projectId, accessToken, cor
   const id = `mc_${date.replace(/-/g, '')}_${machineNumber}_${shift}`;
   const path = `machine_cycles/${id}`;
   const existing = await getFirestoreDoc(projectId, accessToken, path);
+  let previous = null;
   if (existing) {
-    const previous = convertFromFirestoreFields(existing.fields || {});
+    previous = convertFromFirestoreFields(existing.fields || {});
     if (previous.workerId !== workerId) throw createHttpError('تم تسجيل تقرير هذه المكينة والوردية لهذا اليوم بواسطة حساب آخر', 409, 'cycle_report_exists');
+    const writeDecision = getCycleReportWriteDecision(previous, { workerId, count: payload.count, photo, recordedAt });
+    if (writeDecision === 'duplicate') {
+      const { photo: _storedPhoto, ...publicPrevious } = previous;
+      return jsonResponse({ success: true, data: { ...publicPrevious, hasPhoto: previous.hasPhoto !== false } }, 200, corsHeaders);
+    }
   }
   const record = {
     id, machineNumber, shift, date, count: payload.count, photo, hasPhoto: true,
@@ -1389,6 +1453,16 @@ async function handleWorkerTaskStatus(request, taskId, workerId, projectId, acce
   return jsonResponse({ success: true, task: sanitizeResourceOutput(record, 'tasks') }, 200, corsHeaders);
 }
 
+export function assertWorkerTaskProgressAccess(task, workerId) {
+  if (!task || task.assignedWorkerId !== workerId) {
+    throw createHttpError('لا يمكنك تحديث مهمة غير مسندة إليك', 403, 'task_not_assigned');
+  }
+  // Do not reject completed/cancelled status here: handleTaskProgress must
+  // first check the idempotency ledger so a retry of an already committed
+  // mutation can safely return duplicate success after a lost response.
+  return true;
+}
+
 async function handleWorkerTaskProgress(request, taskId, workerId, projectId, accessToken, corsHeaders) {
   const workerDoc = await getFirestoreDoc(projectId, accessToken, `workers/${workerId}`);
   if (!workerDoc || convertFromFirestoreFields(workerDoc.fields || {}).status !== 'active') {
@@ -1397,8 +1471,7 @@ async function handleWorkerTaskProgress(request, taskId, workerId, projectId, ac
   const taskDoc = await getFirestoreDoc(projectId, accessToken, `tasks/${taskId}`);
   if (!taskDoc) throw createHttpError('المهمة غير موجودة', 404, 'task_not_found');
   const task = convertFromFirestoreFields(taskDoc.fields || {});
-  if (task.assignedWorkerId !== workerId) throw createHttpError('لا يمكنك تحديث مهمة غير مسندة إليك', 403, 'task_not_assigned');
-  if (task.status === 'cancelled' || task.status === 'completed') throw createHttpError('هذه المهمة مغلقة', 409, 'task_closed');
+  assertWorkerTaskProgressAccess(task, workerId);
   return handleTaskProgress(request, taskId, workerId, projectId, accessToken, corsHeaders, workerId);
 }
 
