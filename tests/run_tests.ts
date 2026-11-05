@@ -10,6 +10,7 @@
  */
 
 import { normalizeModelName } from '../src/utils/modelNormalization';
+import { enqueueOfflineMutation, readOfflineMutations, removeOfflineMutation } from '../src/utils/offlineMutationQueue';
 import {
   validateDualImageLimits,
   MAX_IMAGE_CHARS,
@@ -593,6 +594,34 @@ export async function runAllTests() {
 
   console.log('\n====================================================');
   console.log(`إجمالي الاختبارات: ${passed + failed} | نجح: ${passed} | فشل: ${failed}`);
+  console.log('\\n11. اختبارات طابور المزامنة دون اتصال:');
+  const memory = new Map<string, string>();
+  const storage = {
+    get length() { return memory.size; },
+    key(index: number) { return [...memory.keys()][index] ?? null; },
+    getItem(key: string) { return memory.get(key) ?? null; },
+    setItem(key: string, value: string) { memory.set(key, value); },
+    removeItem(key: string) { memory.delete(key); }
+  };
+  const legacyKey = 'fc-founoun-offline-operations-v2:worker_test';
+  const itemPrefix = legacyKey + ':item:';
+  const legacyMutation = { id: 'legacy-1', path: '/api/worker/tasks/task_1/progress', init: { method: 'POST', body: JSON.stringify({ quantity: 1 }) }, createdAt: '2026-11-05T08:00:00.000Z' };
+  storage.setItem(legacyKey, JSON.stringify([legacyMutation]));
+  const migrated = readOfflineMutations(storage, legacyKey, itemPrefix);
+  assert(migrated.length === 1 && migrated[0].id === 'legacy-1' && storage.getItem(legacyKey) === null,
+    'ترحيل طابور المزامنة القديم دون فقدان العمليات المحفوظة');
+  const secondMutation = { id: 'queued-2', path: '/api/worker/tasks/task_1/status', init: { method: 'PUT', body: JSON.stringify({ status: 'pending' }) }, createdAt: '2026-11-05T08:01:00.000Z' };
+  enqueueOfflineMutation(storage, legacyKey, itemPrefix, secondMutation);
+  removeOfflineMutation(storage, itemPrefix, 'legacy-1');
+  const thirdMutation = { id: 'queued-3', path: '/api/worker/cycles', init: { method: 'POST', body: JSON.stringify({ count: 25 }) }, createdAt: '2026-11-05T08:02:00.000Z' };
+  enqueueOfflineMutation(storage, legacyKey, itemPrefix, thirdMutation);
+  const afterConcurrentAppend = readOfflineMutations(storage, legacyKey, itemPrefix);
+  assert(afterConcurrentAppend.length === 2 && afterConcurrentAppend[0].id === 'queued-2' && afterConcurrentAppend[1].id === 'queued-3',
+    'حذف العملية التي نجحت دون مسح عمليات جديدة أضيفت أثناء المزامنة');
+  removeOfflineMutation(storage, itemPrefix, 'queued-2');
+  assert(readOfflineMutations(storage, legacyKey, itemPrefix).map(item => item.id).join(',') === 'queued-3',
+    'حذف عملية واحدة لا يؤثر في بقية العمليات المعلقة');
+
   console.log('====================================================\n');
 
   if (failed > 0) {
