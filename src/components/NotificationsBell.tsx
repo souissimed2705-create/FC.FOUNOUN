@@ -11,7 +11,7 @@ export const NotificationsBell: React.FC = () => {
   const [soundMode, setSoundMode] = useState<'soft' | 'bright' | 'strong' | 'silent'>(() => {
     try {
       const saved = localStorage.getItem('fc-message-sound-mode');
-      return saved === 'silent' ? 'silent' : 'strong';
+      return saved === 'soft' || saved === 'bright' || saved === 'strong' || saved === 'silent' ? saved : 'strong';
     } catch { return 'strong'; }
   });
   const seenNotificationIds = useRef<Set<string> | null>(null);
@@ -37,24 +37,25 @@ export const NotificationsBell: React.FC = () => {
       const context = audioContextRef.current;
       if (context.state !== 'running') await context.resume();
       if (context.state !== 'running') return;
-      const notes = mode === 'strong' ? [784, 988, 1175] : mode === 'bright' ? [880, 1175] : [660, 784];
-      const noteGap = mode === 'strong' ? 0.22 : 0.16;
+      // Distinct, rising five-note alert; keep it short enough not to become intrusive.
+      const notes = mode === 'strong' ? [784, 988, 1175, 988, 1568] : mode === 'bright' ? [880, 1175, 1397] : [660, 784];
+      const noteGap = mode === 'strong' ? 0.19 : 0.16;
       notes.forEach((frequency, index) => {
         const oscillator = context.createOscillator();
         const gain = context.createGain();
         const start = context.currentTime + index * noteGap;
-        const duration = mode === 'strong' ? 0.25 : 0.16;
-        oscillator.type = mode === 'strong' ? 'triangle' : 'sine';
+        const duration = mode === 'strong' ? 0.28 : 0.18;
+        oscillator.type = mode === 'strong' ? 'square' : 'sine';
         oscillator.frequency.setValueAtTime(frequency, start);
         gain.gain.setValueAtTime(0.0001, start);
-        gain.gain.exponentialRampToValueAtTime(mode === 'strong' ? 0.65 : 0.28, start + 0.025);
+        gain.gain.exponentialRampToValueAtTime(mode === 'strong' ? 0.82 : 0.32, start + 0.025);
         gain.gain.exponentialRampToValueAtTime(0.0001, start + duration);
         oscillator.connect(gain);
         gain.connect(context.destination);
         oscillator.start(start);
         oscillator.stop(start + duration + 0.01);
       });
-      if (mode === 'strong' && typeof navigator.vibrate === 'function') navigator.vibrate([180, 70, 180]);
+      if (mode === 'strong' && typeof navigator.vibrate === 'function') navigator.vibrate([220, 80, 220, 80, 320]);
     } catch (e) { console.warn('Message sound unavailable:', e); }
   };
 
@@ -72,8 +73,8 @@ export const NotificationsBell: React.FC = () => {
       const nextItems = result.data || [];
       const nextIds = new Set(nextItems.map(item => item.id));
       if (seenNotificationIds.current) {
-        const hasNewMessage = nextItems.some(item => item.type === 'direct_message' && !seenNotificationIds.current?.has(item.id));
-        if (hasNewMessage) playMessageSound();
+        const hasNewNotification = nextItems.some(item => !seenNotificationIds.current?.has(item.id));
+        if (hasNewNotification) void playMessageSound();
       }
       seenNotificationIds.current = nextIds;
       setItems(nextItems);
@@ -87,6 +88,18 @@ export const NotificationsBell: React.FC = () => {
     void refresh();
     const timer = window.setInterval(() => void refresh(), 15000);
     return () => window.clearInterval(timer);
+  }, []);
+
+  // Unlock Web Audio on the first real interaction anywhere in the app, not only
+  // when the user opens the notifications panel. Mobile browsers require this.
+  useEffect(() => {
+    const unlockOnce = () => { void unlockMessageAudio(); };
+    window.addEventListener('pointerdown', unlockOnce, { once: true, passive: true });
+    window.addEventListener('keydown', unlockOnce, { once: true });
+    return () => {
+      window.removeEventListener('pointerdown', unlockOnce);
+      window.removeEventListener('keydown', unlockOnce);
+    };
   }, []);
 
   useEffect(() => {
