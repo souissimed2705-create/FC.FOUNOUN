@@ -67,7 +67,8 @@ function normalizeMutationInit(init: RequestInit): OfflineMutationInit {
 async function migrateLegacyQueue(db: IDBDatabase, userId: string): Promise<void> {
   if (typeof localStorage === 'undefined') return;
   const legacyKey = `${LEGACY_QUEUE_PREFIX}:${userId}`;
-  const raw = localStorage.getItem(legacyKey);
+  let raw: string | null = null;
+  try { raw = localStorage.getItem(legacyKey); } catch { return; }
   if (!raw) return;
   let legacy: unknown;
   try { legacy = JSON.parse(raw); } catch { return; }
@@ -86,8 +87,10 @@ async function migrateLegacyQueue(db: IDBDatabase, userId: string): Promise<void
   const store = tx.objectStore(STORE_NAME);
   for (const item of valid) store.put(item);
   await transactionDone(tx);
-  if (valid.length === legacy.length) localStorage.removeItem(legacyKey);
-  else localStorage.setItem(legacyKey, JSON.stringify(legacy.filter(item => !valid.some(saved => saved.id === item?.id))));
+  try {
+    if (valid.length === legacy.length) localStorage.removeItem(legacyKey);
+    else localStorage.setItem(legacyKey, JSON.stringify(legacy.filter(item => !valid.some(saved => saved.id === item?.id))));
+  } catch { /* The IndexedDB copy is already durable; a later migration pass is idempotent. */ }
 }
 
 export async function enqueueOfflineMutation(userId: string, path: string, init: RequestInit): Promise<void> {
