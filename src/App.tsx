@@ -10,6 +10,7 @@ import { WorkerLogin } from './components/WorkerLogin';
 import { NamedCodeLogin } from './components/NamedCodeLogin';
 import { WorkerDashboard } from './components/WorkerDashboard';
 import { PWAInstallBadge } from './components/PWAInstallBadge';
+import { NotificationsBell } from './components/NotificationsBell';
 import { useOnlineStatus } from './hooks/useOnlineStatus';
 import { WifiOff, Sparkles, Crown } from 'lucide-react';
 import { onAuthStateChanged, signOut } from 'firebase/auth';
@@ -138,6 +139,7 @@ export default function App() {
 
           {/* Right Action: PWA Install Button */}
           <div className="flex items-center gap-2">
+            {(verifiedAdmin || verifiedWorker) && <NotificationsBell />}
             <PWAInstallBadge />
           </div>
         </div>
