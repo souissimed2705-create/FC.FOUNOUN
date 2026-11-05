@@ -25,7 +25,7 @@ export const WorkerDashboard: React.FC<Props> = ({ worker }) => {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
   const [notice, setNotice] = useState('');
-  const [pendingSync, setPendingSync] = useState(queuedMutationCount());
+  const [pendingSync, setPendingSync] = useState(0);
   const refresh = useCallback(async () => {
     try {
       const response = await listMyTasks();
@@ -69,14 +69,14 @@ export const WorkerDashboard: React.FC<Props> = ({ worker }) => {
     }
   }, [cycleNextPageToken, loadingMoreCycles]);
 
-  useEffect(() => { void refresh(); void refreshCycles(); }, [refresh, refreshCycles]);
+  useEffect(() => { void refresh(); void refreshCycles(); void queuedMutationCount().then(setPendingSync).catch(() => setPendingSync(0)); }, [refresh, refreshCycles]);
   useEffect(() => {
     let active = true;
     const syncPendingOperations = async () => {
       if (!navigator.onLine) return;
       const flushed = await flushQueuedMutations();
       if (!active) return;
-      setPendingSync(queuedMutationCount());
+      setPendingSync(await queuedMutationCount());
       if (flushed > 0) {
         setNotice(`تمت مزامنة ${flushed} عملية محفوظة دون اتصال.`);
         await refresh();
@@ -100,7 +100,7 @@ export const WorkerDashboard: React.FC<Props> = ({ worker }) => {
     if (!cyclePhoto) { setError('صورة عداد المكينة إلزامية.'); return; }
     setBusy(true); setError(''); setNotice('');
     const recordedAt = new Date().toISOString();
-    try { if (!navigator.onLine) { queueMutation('/api/worker/cycles', { method: 'POST', body: JSON.stringify({ count, photo: cyclePhoto, recordedAt }) }); setPendingSync(queuedMutationCount()); setNotice('لا يوجد اتصال؛ حُفظ تقرير الدورات وصورة العداد ووقت التسجيل على الهاتف وسيتزامن عند عودة الاتصال.'); } else { await submitMachineCycle(count, cyclePhoto, recordedAt); setNotice('تم حفظ تقرير الدورات وصورة العداد مع التاريخ والوقت تلقائياً.'); await refreshCycles(); } setCycleCount(''); setCyclePhoto(''); setCyclePhotoName(''); }
+    try { if (!navigator.onLine) { await queueMutation('/api/worker/cycles', { method: 'POST', body: JSON.stringify({ count, photo: cyclePhoto, recordedAt }) }); setPendingSync(queuedMutationCount()); setNotice('لا يوجد اتصال؛ حُفظ تقرير الدورات وصورة العداد ووقت التسجيل على الهاتف وسيتزامن عند عودة الاتصال.'); } else { await submitMachineCycle(count, cyclePhoto, recordedAt); setNotice('تم حفظ تقرير الدورات وصورة العداد مع التاريخ والوقت تلقائياً.'); await refreshCycles(); } setCycleCount(''); setCyclePhoto(''); setCyclePhotoName(''); }
     catch (err) {
       if (err instanceof TypeError) {
         try {
@@ -127,7 +127,7 @@ export const WorkerDashboard: React.FC<Props> = ({ worker }) => {
     const init = { method: 'POST', body: JSON.stringify(body) };
     try {
       if (!navigator.onLine) {
-        queueMutation(path, init);
+        await queueMutation(path, init);
         setPendingSync(queuedMutationCount()); setNotice('لا يوجد اتصال؛ حُفظت كمية الإنجاز وستتم مزامنتها عند عودة الاتصال.');
       } else await recordMyProgress(task.id, body);
       setQuantities(v => ({ ...v, [task.id]: '' }));
