@@ -10,6 +10,7 @@
  */
 
 import { normalizeModelName } from '../src/utils/modelNormalization';
+import { normalizeMutationInit } from '../src/utils/offlineQueue';
 import {
   validateDualImageLimits,
   MAX_IMAGE_CHARS,
@@ -48,6 +49,9 @@ import {
   convertToFirestoreFields,
   convertFromFirestoreFields,
   resolveCycleRecordedAt,
+  getCycleReportWriteDecision,
+  buildLoginAttemptRecord,
+  assertWorkerTaskProgressAccess,
   computePinPbkdf2,
   computeStoredPinHash,
 } from '../worker/worker.js';
@@ -447,6 +451,16 @@ export async function runAllTests() {
   assert(reuseWorkerSlot.currentDocument.updateTime === inactiveWorkerSlot.updateTime,
     'السماح بإعادة استخدام حجز محرر مع شرط updateTime');
 
+  // A worker retry must reach the idempotency ledger even after the task was completed by that same mutation.
+  assert(assertWorkerTaskProgressAccess({ assignedWorkerId: 'worker_1', status: 'completed' }, 'worker_1') === true,
+    'السماح لطلب الإنجاز المكرر بالوصول إلى سجل منع التكرار حتى بعد اكتمال المهمة');
+  assertThrowsWithCode(
+    () => assertWorkerTaskProgressAccess({ assignedWorkerId: 'worker_2', status: 'completed' }, 'worker_1'),
+    'task_not_assigned',
+    'منع العامل من إرسال إنجاز لمهمة غير مسندة إليه حتى عند إعادة المحاولة',
+    403
+  );
+
   // 9. Worker account freeze is reversible; the record is retained, never hard-deleted.
   console.log('\n9. اختبارات تجميد حساب العامل دون حذفه:');
   assert(assertTaskUpdateStatusAllowed('in_progress', 'pending') === true,
@@ -577,6 +591,42 @@ export async function runAllTests() {
     resolveCycleRecordedAt('2026-11-04T18:30:00.000Z', cycleServerNow) === '2026-11-04T18:30:00.000Z',
     'الاحتفاظ بوقت التسجيل الأصلي عند مزامنة تقرير محفوظ دون اتصال'
   );
+  const latestCycle = {
+    workerId: 'worker_123',
+    count: 1800,
+    photo: 'data:image/jpeg;base64,QUJD',
+    recordedAt: '2026-11-04T19:00:00.000Z',
+  };
+  assert(
+    getCycleReportWriteDecision(latestCycle, {
+      workerId: 'worker_123', count: 1800, photo: 'data:image/jpeg;base64,QUJD',
+      recordedAt: '2026-11-04T19:00:00.000Z',
+    }) === 'duplicate',
+    'اعتبار إعادة إرسال التقرير نفسه بالوقت والبيانات نفسيهما عملية مكررة آمنة'
+  );
+  let staleCycleRejected = false;
+  try {
+    getCycleReportWriteDecision(latestCycle, {
+      workerId: 'worker_123', count: 900, photo: 'data:image/jpeg;base64,REVG',
+      recordedAt: '2026-11-04T18:00:00.000Z',
+    });
+  } catch (err: any) { staleCycleRejected = err.code === 'stale_cycle_report' && err.status === 409; }
+  assert(staleCycleRejected, 'رفض تقرير قديم يصل بعد تقرير أحدث أثناء المزامنة');
+  let conflictingCycleRejected = false;
+  try {
+    getCycleReportWriteDecision(latestCycle, {
+      workerId: 'worker_123', count: 2000, photo: 'data:image/jpeg;base64,SElK',
+      recordedAt: '2026-11-04T19:00:00.000Z',
+    });
+  } catch (err: any) { conflictingCycleRejected = err.code === 'cycle_report_timestamp_conflict' && err.status === 409; }
+  assert(conflictingCycleRejected, 'رفض تقرير مختلف يحمل وقت التسجيل نفسه بدل استبدال البيانات');
+  assert(
+    getCycleReportWriteDecision(latestCycle, {
+      workerId: 'worker_123', count: 1900, photo: 'data:image/jpeg;base64,S0xN',
+      recordedAt: '2026-11-04T19:30:00.000Z',
+    }) === 'write',
+    'السماح بتحديث التقرير عندما يكون وقت التسجيل أحدث فعلاً'
+  );
   assert(
     resolveCycleRecordedAt(undefined, cycleServerNow) === cycleServerNow.toISOString(),
     'استخدام وقت الخادم تلقائياً للعملاء الذين لا يرسلون وقتاً'
@@ -591,10 +641,43 @@ export async function runAllTests() {
   assert(futureCycleTimeRejected, 'رفض وقت تسجيل يقع في المستقبل بأكثر من خمس دقائق');
 
 
-  console.log('\n====================================================');
-  console.log(`إجمالي الاختبارات: ${passed + failed} | نجح: ${passed} | فشل: ${failed}`);
+  console.log('\\n11. اختبارات عداد محاولات الدخول المتزامنة:');
+  const loginNow = Date.parse('2026-11-05T08:00:00.000Z');
+  let attemptsRecord: any = {};
+  for (let i = 1; i <= 4; i++) {
+    attemptsRecord = buildLoginAttemptRecord('workerId', 'wkr_login_test', attemptsRecord, loginNow + i * 1000, false);
+    assert(attemptsRecord.count === i && attemptsRecord.lockedUntil === 0,
+      `احتساب محاولة الدخول الفاشلة رقم ${i} دون فقدان العداد`);
+  }
+  attemptsRecord = buildLoginAttemptRecord('workerId', 'wkr_login_test', attemptsRecord, loginNow + 5000, false);
+  assert(attemptsRecord.count === 0 && attemptsRecord.lockedUntil === loginNow + 5 * 1000 + 15 * 60 * 1000,
+    'قفل الحساب لمدة 15 دقيقة بعد خمس محاولات فاشلة');
+  let lockedLoginRejected = false;
+  try { buildLoginAttemptRecord('workerId', 'wkr_login_test', attemptsRecord, loginNow + 6000, false); }
+  catch (err: any) { lockedLoginRejected = err.status === 429 && err.code === 'login_locked'; }
+  assert(lockedLoginRejected, 'رفض المحاولات أثناء فترة القفل');
+  const resetLoginAttempts = buildLoginAttemptRecord('uid', 'mgr_login_test', attemptsRecord, loginNow + 16 * 60 * 1000, true);
+  assert(resetLoginAttempts.count === 0 && resetLoginAttempts.lockedUntil === 0 && Object.prototype.hasOwnProperty.call(resetLoginAttempts, 'uid'),
+    'إعادة تصفير عداد المحاولات بعد دخول صحيح وانتهاء القفل');
+
   console.log('====================================================\n');
 
+  console.log('\\n12. اختبارات تجهيز عمليات المزامنة للتخزين المحلي:');
+  const normalizedQueueInit = normalizeMutationInit({
+    method: 'POST',
+    body: JSON.stringify({ count: 25, photo: 'data:image/webp;base64,AAAA' }),
+    headers: { 'X-Request-Source': 'offline-queue' }
+  });
+  assert(normalizedQueueInit.method === 'POST' &&
+    normalizedQueueInit.body?.includes('"count":25') === true &&
+    normalizedQueueInit.headers?.['X-Request-Source'] === 'offline-queue',
+    'حفظ طريقة الطلب والحمولة والرؤوس في سجل قابل للاسترجاع من IndexedDB');
+  let unsupportedQueueBodyRejected = false;
+  try { normalizeMutationInit({ method: 'POST', body: { binary: true } as unknown as BodyInit }); }
+  catch { unsupportedQueueBodyRejected = true; }
+  assert(unsupportedQueueBodyRejected, 'رفض حمولة غير نصية حتى لا تتحول العملية المحفوظة إلى بيانات تالفة');
+
+  console.log(`إجمالي الاختبارات: ${passed + failed} | نجح: ${passed} | فشل: ${failed}`);
   if (failed > 0) {
     process.exit(1);
   }
