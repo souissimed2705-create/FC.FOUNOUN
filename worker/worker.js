@@ -88,13 +88,16 @@ export default {
     const directMessagesMatch = cleanPath.match(/^\/api\/direct-messages\/([^/]+)$/);
     const directMessagesRoute = directMessagesMatch && ['GET', 'POST'].includes(request.method);
     const workerCyclesRoute = cleanPath === '/api/worker/cycles' && ['GET', 'POST'].includes(request.method);
+    const notificationsListRoute = cleanPath === '/api/notifications' && request.method === 'GET';
+    const notificationReadMatch = cleanPath.match(/^\/api\/notifications\/([^/]+)\/read$/);
+    const notificationReadRoute = Boolean(notificationReadMatch && request.method === 'PUT');
     const managementCyclesRoute = cleanPath === '/api/cycles' && request.method === 'GET';
     const cyclePhotoMatch = cleanPath.match(/^\/api\/cycles\/([^/]+)\/photo$/);
     const managementCyclePhotoRoute = cyclePhotoMatch && request.method === 'GET';
     if (managementRoute?.error) {
       return jsonResponse({ success: false, error: managementRoute.error.message, code: managementRoute.error.code }, 400, corsHeaders);
     }
-    if (!managementRoute && !workerLoginRoute && !managementLoginRoute && !managementAccountsRoute && !managementAccountActionRoute && !workerTasksRoute && !workerProgressRoute && !workerTaskStatusRoute && !workerMessagesRoute && !contactsRoute && !directMessagesRoute && !workerCyclesRoute && !managementCyclesRoute && !managementCyclePhotoRoute && !adminMessagesRoute && !cleanPath.startsWith('/api/models')) {
+    if (!managementRoute && !workerLoginRoute && !managementLoginRoute && !managementAccountsRoute && !managementAccountActionRoute && !workerTasksRoute && !workerProgressRoute && !workerTaskStatusRoute && !workerMessagesRoute && !contactsRoute && !directMessagesRoute && !workerCyclesRoute && !managementCyclesRoute && !managementCyclePhotoRoute && !adminMessagesRoute && !notificationsListRoute && !notificationReadRoute && !cleanPath.startsWith('/api/models')) {
       return jsonResponse({ success: false, error: 'المسار المطلوب غير موجود', code: 'not_found' }, 404, corsHeaders);
     }
 
@@ -177,6 +180,15 @@ export default {
       const callerUid = decodedToken.sub;
 
       const saAccessToken = await getServiceAccountAccessToken(serviceAccount);
+      if (notificationsListRoute || notificationReadRoute) {
+        if (decodedToken.role === 'worker' && decodedToken.workerId === callerUid) {
+          const workerDoc = await getFirestoreDoc(projectId, saAccessToken, `workers/${callerUid}`);
+          if (!workerDoc || convertFromFirestoreFields(workerDoc.fields || {}).status !== 'active') throw createHttpError('حسابك غير نشط', 403, 'worker_inactive');
+        } else {
+          await verifyManagementRole(callerUid, projectId, saAccessToken);
+        }
+        return await handleNotifications(request, notificationReadMatch ? safeDecodeUriSegment(notificationReadMatch[1]) : null, callerUid, projectId, saAccessToken, corsHeaders);
+      }
       if (contactsRoute || directMessagesRoute) {
         let callerRole;
         if (decodedToken.role === 'worker' && decodedToken.workerId === callerUid) {
@@ -490,6 +502,9 @@ async function handleCreateResource(request, resource, callerUid, projectId, acc
       }
     }
     throw err;
+  }
+  if (resource === 'tasks') {
+    await createUserNotification(record.assignedWorkerId, 'task_assigned', 'أمر إنتاج جديد', `تم إسناد ${record.title} إليك بكمية ${record.targetQuantity}.`, record.id, projectId, accessToken);
   }
   const responseRecord = resource === 'workers' ? sanitizeWorkerOutputForRole(record, callerRole) : record;
   return jsonResponse({ success: true, [resource === 'workers' ? 'worker' : 'task']: responseRecord }, 201, corsHeaders);
@@ -1200,6 +1215,55 @@ async function handleListContacts(callerUid, projectId, accessToken, corsHeaders
   return jsonResponse({ success: true, data: contacts }, 200, corsHeaders);
 }
 
+async function createUserNotification(recipientUid, type, title, body, relatedId, projectId, accessToken) {
+  if (typeof recipientUid !== 'string' || !/^[A-Za-z0-9_-]{3,128}$/.test(recipientUid)) return false;
+  const id = `ntf_${crypto.randomUUID().replace(/-/g, '')}`;
+  const record = {
+    id, recipientUid, type: String(type).slice(0, 40),
+    title: String(title).slice(0, 120), body: String(body).slice(0, 500),
+    relatedId: String(relatedId || '').slice(0, 128),
+    createdAt: new Date().toISOString(), readAt: null
+  };
+  try {
+    await commitFirestoreTransaction(projectId, accessToken, null, [{
+      update: { name: `projects/${projectId}/databases/(default)/documents/notifications/${id}`, fields: convertToFirestoreFields(record) },
+      currentDocument: { exists: false }
+    }]);
+    return true;
+  } catch (err) {
+    // Notification failure must never roll back or make a committed business action appear failed.
+    console.error('[Notification write failed]', { recipientUid, type, error: err?.message });
+    return false;
+  }
+}
+
+async function handleNotifications(request, notificationId, callerUid, projectId, accessToken, corsHeaders) {
+  if (!notificationId) {
+    const rows = await listFirestoreDocs(projectId, accessToken, 'notifications', 200, null, null,
+      ['id', 'recipientUid', 'type', 'title', 'body', 'relatedId', 'createdAt', 'readAt']);
+    const data = rows.documents
+      .map(doc => convertFromFirestoreFields(doc.fields || {}))
+      .filter(item => item.recipientUid === callerUid)
+      .sort((a, b) => String(b.createdAt || '').localeCompare(String(a.createdAt || '')))
+      .slice(0, 50);
+    return jsonResponse({ success: true, data }, 200, corsHeaders);
+  }
+  if (!/^ntf_[a-f0-9]{32}$/.test(notificationId)) throw createHttpError('معرّف الإشعار غير صالح', 400, 'invalid_notification_id');
+  const path = `notifications/${notificationId}`;
+  const doc = await getFirestoreDoc(projectId, accessToken, path);
+  if (!doc) throw createHttpError('الإشعار غير موجود', 404, 'notification_not_found');
+  const record = convertFromFirestoreFields(doc.fields || {});
+  if (record.recipientUid !== callerUid) throw createHttpError('لا تملك صلاحية تعديل هذا الإشعار', 403, 'notification_forbidden');
+  if (!record.readAt) {
+    record.readAt = new Date().toISOString();
+    await commitFirestoreTransaction(projectId, accessToken, null, [{
+      update: { name: `projects/${projectId}/databases/(default)/documents/${path}`, fields: convertToFirestoreFields(record) },
+      currentDocument: { updateTime: doc.updateTime }
+    }]);
+  }
+  return jsonResponse({ success: true, data: record }, 200, corsHeaders);
+}
+
 async function readDirectConversation(conversationId, uidA, uidB, projectId, accessToken) {
   const url = `${FIRESTORE_BASE_URL}/${projectId}/databases/(default)/documents:runQuery`;
   const response = await fetch(url, {
@@ -1269,6 +1333,7 @@ async function handleDirectMessages(request, otherUid, callerUid, callerRole, pr
   conversationWrite.currentDocument = conversationDoc?.updateTime ? { updateTime: conversationDoc.updateTime } : { exists: false };
   const messageWrite = { update: { name: `projects/${projectId}/databases/(default)/documents/messages/${messageId}`, fields: convertToFirestoreFields(message) }, currentDocument: { exists: false } };
   await commitFirestoreTransaction(projectId, accessToken, null, [conversationWrite, messageWrite]);
+  await createUserNotification(otherUid, 'direct_message', 'رسالة جديدة', `رسالة جديدة من ${sender.displayName}.`, messageId, projectId, accessToken);
   return jsonResponse({ success: true, data: message }, 201, corsHeaders);
 }
 
@@ -1585,6 +1650,9 @@ async function handleTaskProgress(request, taskId, callerUid, projectId, accessT
     const latestRecord = convertFromFirestoreFields(latestDoc.fields || {});
     if (expectedWorkerId && latestRecord.assignedWorkerId !== expectedWorkerId) throw createHttpError('لا يمكنك الاطلاع على مهمة غير مسندة إليك', 403, 'task_not_assigned');
     return jsonResponse({ success: true, task: sanitizeResourceOutput(latestRecord, 'tasks'), duplicate: true }, 200, corsHeaders);
+  }
+  if (record.createdBy && record.createdBy !== callerUid) {
+    await createUserNotification(record.createdBy, 'task_progress', 'تحديث أمر الإنتاج', `سُجّل إنجاز ${payload.quantity} قطعة من ${record.title || 'أمر الإنتاج'}، والإجمالي ${record.completedQuantity} من ${record.targetQuantity}.`, taskId, projectId, accessToken);
   }
   return jsonResponse({ success: true, task: sanitizeResourceOutput(record, 'tasks'), duplicate: false }, 200, corsHeaders);
 }
