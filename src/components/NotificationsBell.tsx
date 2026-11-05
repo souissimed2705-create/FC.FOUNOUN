@@ -8,43 +8,64 @@ export const NotificationsBell: React.FC = () => {
   const [items, setItems] = useState<NotificationRecord[]>([]);
   const [open, setOpen] = useState(false);
   const [error, setError] = useState('');
-  const [soundMode, setSoundMode] = useState<'soft' | 'bright' | 'silent'>(() => {
+  const [soundMode, setSoundMode] = useState<'soft' | 'bright' | 'strong' | 'silent'>(() => {
     try {
       const saved = localStorage.getItem('fc-message-sound-mode');
-      return saved === 'bright' || saved === 'silent' ? saved : 'soft';
-    } catch { return 'soft'; }
+      return saved === 'soft' || saved === 'bright' || saved === 'silent' ? saved : 'strong';
+    } catch { return 'strong'; }
   });
   const seenNotificationIds = useRef<Set<string> | null>(null);
+  const audioContextRef = useRef<AudioContext | null>(null);
+  const audioUnlockedRef = useRef(false);
 
-  const playMessageSound = (mode: 'soft' | 'bright' = soundMode) => {
-    if (mode === 'silent') return;
+  const unlockMessageAudio = async () => {
     try {
       const AudioContextClass = window.AudioContext;
       if (!AudioContextClass) return;
-      const context = new AudioContextClass();
-      const notes = mode === 'bright' ? [880, 1175] : [660, 784];
+      if (!audioContextRef.current || audioContextRef.current.state === 'closed') {
+        audioContextRef.current = new AudioContextClass();
+      }
+      if (audioContextRef.current.state !== 'running') await audioContextRef.current.resume();
+      audioUnlockedRef.current = audioContextRef.current.state === 'running';
+    } catch (e) { console.warn('Message audio could not be unlocked:', e); }
+  };
+
+  const playMessageSound = async (mode: 'soft' | 'bright' | 'strong' = soundMode === 'silent' ? 'strong' : soundMode) => {
+    if (mode === 'silent') return;
+    try {
+      if (!audioContextRef.current || audioContextRef.current.state === 'closed') {
+        audioContextRef.current = new window.AudioContext();
+      }
+      const context = audioContextRef.current;
+      if (context.state !== 'running') await context.resume();
+      if (context.state !== 'running') return;
+      const notes = mode === 'strong' ? [784, 988, 1175] : mode === 'bright' ? [880, 1175] : [660, 784];
+      const noteGap = mode === 'strong' ? 0.22 : 0.16;
       notes.forEach((frequency, index) => {
         const oscillator = context.createOscillator();
         const gain = context.createGain();
-        const start = context.currentTime + index * 0.16;
-        oscillator.type = 'sine';
-        oscillator.frequency.value = frequency;
+        const start = context.currentTime + index * noteGap;
+        const duration = mode === 'strong' ? 0.25 : 0.16;
+        oscillator.type = mode === 'strong' ? 'triangle' : 'sine';
+        oscillator.frequency.setValueAtTime(frequency, start);
         gain.gain.setValueAtTime(0.0001, start);
-        gain.gain.exponentialRampToValueAtTime(0.12, start + 0.025);
-        gain.gain.exponentialRampToValueAtTime(0.0001, start + 0.14);
+        gain.gain.exponentialRampToValueAtTime(mode === 'strong' ? 0.65 : 0.28, start + 0.025);
+        gain.gain.exponentialRampToValueAtTime(0.0001, start + duration);
         oscillator.connect(gain);
         gain.connect(context.destination);
         oscillator.start(start);
-        oscillator.stop(start + 0.15);
+        oscillator.stop(start + duration + 0.01);
       });
-      window.setTimeout(() => void context.close(), 700);
+      if (mode === 'strong' && typeof navigator.vibrate === 'function') navigator.vibrate([180, 70, 180]);
     } catch (e) { console.warn('Message sound unavailable:', e); }
   };
 
-  const changeSoundMode = (mode: 'soft' | 'bright' | 'silent') => {
+  const changeSoundMode = (mode: 'soft' | 'bright' | 'strong' | 'silent') => {
     setSoundMode(mode);
     try { localStorage.setItem('fc-message-sound-mode', mode); } catch { /* device storage unavailable */ }
-    if (mode !== 'silent') playMessageSound(mode);
+    if (mode !== 'silent') {
+      void unlockMessageAudio().then(() => playMessageSound(mode));
+    }
   };
 
   const refresh = async () => {
@@ -96,6 +117,7 @@ export const NotificationsBell: React.FC = () => {
         type="button"
         onClick={() => {
           setOpen(true);
+          void unlockMessageAudio();
           void refresh();
         }}
         className="relative flex h-10 w-10 items-center justify-center rounded-xl border border-[#D4AF37]/30 bg-[#17140D] text-[#F5D77F]"
@@ -123,7 +145,7 @@ export const NotificationsBell: React.FC = () => {
             style={{ maxHeight: 'min(82dvh, 680px)' }}
           >
             <div className="flex shrink-0 items-center justify-between border-b border-white/10 p-4">
-              <div><h2 id="notifications-title" className="text-base font-bold text-[#F5D77F]">الإشعارات</h2><div className="mt-2 flex flex-wrap items-center gap-2 text-xs"><Volume2 className="h-4 w-4 text-[#D4AF37]" /><label htmlFor="message-sound-mode" className="text-gray-300">نغمة الرسائل:</label><select id="message-sound-mode" value={soundMode} onChange={event => changeSoundMode(event.target.value as 'soft' | 'bright' | 'silent')} className="rounded-lg border border-white/15 bg-[#181818] px-2 py-1 text-gray-100"><option value="soft">هادئة</option><option value="bright">واضحة</option><option value="silent">صامت</option></select><button type="button" onClick={() => playMessageSound(soundMode === 'silent' ? 'soft' : soundMode)} className="rounded-lg border border-[#D4AF37]/30 px-2 py-1 text-[#F5D77F]">تجربة</button></div></div>
+              <div><h2 id="notifications-title" className="text-base font-bold text-[#F5D77F]">الإشعارات</h2><div className="mt-2 flex flex-wrap items-center gap-2 text-xs"><Volume2 className="h-4 w-4 text-[#D4AF37]" /><label htmlFor="message-sound-mode" className="text-gray-300">نغمة الرسائل:</label><select id="message-sound-mode" value={soundMode} onChange={event => changeSoundMode(event.target.value as 'soft' | 'bright' | 'strong' | 'silent')} className="rounded-lg border border-white/15 bg-[#181818] px-2 py-1 text-gray-100"><option value="strong">قوية جداً</option><option value="bright">واضحة</option><option value="soft">هادئة</option><option value="silent">صامت</option></select><button type="button" onClick={() => { void unlockMessageAudio().then(() => playMessageSound(soundMode === 'silent' ? 'strong' : soundMode)); }} className="rounded-lg border border-[#D4AF37]/30 px-2 py-1 text-[#F5D77F]">تجربة</button></div></div>
               <button
                 type="button"
                 onClick={() => setOpen(false)}
