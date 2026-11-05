@@ -4,11 +4,13 @@ on:
   pull_request:
     branches:
       - fix/full-project-repair
+      - fix/operations-contracts-rbac
       - main
   push:
     branches:
       - fix/operations-contracts
       - fix/operations-contracts-rbac
+      - fix/pbkdf2-firestore-diagnostics
 
 permissions:
   contents: read
