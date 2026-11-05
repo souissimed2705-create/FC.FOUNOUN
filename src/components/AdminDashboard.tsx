@@ -1,12 +1,13 @@
 import React, { useState } from 'react';
-import { Home, ClipboardList, Crown, LogOut, Package, ShieldCheck, Users, UserCog } from 'lucide-react';
+import { Home, ClipboardList, Crown, LogOut, Package, ShieldCheck, Users, UserCog, MessageCircle } from 'lucide-react';
 import { UserProfile } from '../lib/firebase';
 import { ModelsPanel } from './ModelsPanel';
 import { OperationsPanel } from './OperationsPanel';
 import { ManagementAccountsPanel } from './ManagementAccountsPanel';
+import { PrivateMessagesPanel } from './PrivateMessagesPanel';
 
 interface AdminDashboardProps { admin: UserProfile; onLogout: () => Promise<void>; isLoggingOut: boolean; }
-type Page = 'home' | 'models' | 'tasks' | 'supervisor' | 'workers' | 'accounts';
+type Page = 'home' | 'models' | 'tasks' | 'supervisor' | 'workers' | 'accounts' | 'messages';
 
 export const AdminDashboard: React.FC<AdminDashboardProps> = ({ admin, onLogout, isLoggingOut }) => {
   const [page, setPage] = useState<Page>('home');
@@ -27,6 +28,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ admin, onLogout,
     supervisor: 'مركز المشرف',
     workers: 'إدارة العمال ورموز الدخول',
     accounts: 'حسابات المديرين والمسؤولين',
+    messages: 'المراسلات الخاصة',
   };
 
   return <div className="w-full max-w-5xl mx-auto space-y-5" dir="rtl">
@@ -62,6 +64,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ admin, onLogout,
           <span className="flex h-14 w-14 shrink-0 items-center justify-center rounded-xl bg-[#D4AF37]/10 text-[#F5D77F]"><Package className="h-7 w-7" /></span>
           <span><strong className="block text-base text-white">الموديلات والبحث</strong><small className="mt-1 block text-xs leading-5 text-gray-400">عرض الموديلات والبحث عنها وإضافة بياناتها وتعديلها.</small></span>
         </button>
+        <button onClick={() => go('messages')} className="group flex min-h-28 items-center gap-4 rounded-2xl border border-[#D4AF37]/35 bg-[#111] p-5 text-right transition hover:border-[#D4AF37] hover:bg-[#19160E]"><span className="flex h-14 w-14 shrink-0 items-center justify-center rounded-xl bg-[#D4AF37]/10 text-[#F5D77F]"><MessageCircle className="h-7 w-7" /></span><span><strong className="block text-base text-white">المراسلات الخاصة</strong><small className="mt-1 block text-xs leading-5 text-gray-400">اختر أي مستخدم نشط وتحدث معه في محادثة لا يراها إلا طرفاها.</small></span></button>
         {admin.role !== 'responsible' && <button onClick={() => go('tasks')} className="group flex min-h-28 items-center gap-4 rounded-2xl border border-[#D4AF37]/35 bg-[#111] p-5 text-right transition hover:border-[#D4AF37] hover:bg-[#19160E]">
           <span className="flex h-14 w-14 shrink-0 items-center justify-center rounded-xl bg-[#D4AF37]/10 text-[#F5D77F]"><ClipboardList className="h-7 w-7" /></span>
           <span><strong className="block text-base text-white">المهام وأوامر الإنتاج</strong><small className="mt-1 block text-xs leading-5 text-gray-400">إصدار الأوامر وتعيين العمال ومتابعة الإنجاز والتواصل.</small></span>
@@ -87,5 +90,6 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ admin, onLogout,
     </section>}
     {page === 'workers' && canManageWorkers && <OperationsPanel initialSection="workers" admin={admin} />}
     {page === 'accounts' && isSupervisor && <ManagementAccountsPanel />}
+    {page === 'messages' && <PrivateMessagesPanel />}
   </div>;
 };
