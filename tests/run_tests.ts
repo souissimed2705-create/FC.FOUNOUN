@@ -592,8 +592,6 @@ export async function runAllTests() {
   assert(futureCycleTimeRejected, 'رفض وقت تسجيل يقع في المستقبل بأكثر من خمس دقائق');
 
 
-  console.log('\n====================================================');
-  console.log(`إجمالي الاختبارات: ${passed + failed} | نجح: ${passed} | فشل: ${failed}`);
   console.log('\\n11. اختبارات عداد محاولات الدخول المتزامنة:');
   const loginNow = Date.parse('2026-11-05T08:00:00.000Z');
   let attemptsRecord: any = {};
@@ -615,6 +613,7 @@ export async function runAllTests() {
 
   console.log('====================================================\n');
 
+  console.log(`إجمالي الاختبارات: ${passed + failed} | نجح: ${passed} | فشل: ${failed}`);
   if (failed > 0) {
     process.exit(1);
   }
