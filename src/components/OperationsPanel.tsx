@@ -185,8 +185,8 @@ export const OperationsPanel: React.FC<Props> = ({ initialSection, admin }) => {
     e.preventDefault();
     // Capture the submitted value once; do not clear the controlled input until
     // the server confirms the create (or the offline queue confirms it saved).
-    const formData = new FormData(e.currentTarget);
-    const workerName = String(formData.get('workerName') ?? name ?? '').trim();
+    // Use the controlled React input value directly; FormData may be empty on mobile.
+    const workerName = String(name || '').trim();
     if (!workerName) { setError('اسم العامل مطلوب.'); return; }
     if (isSupervisor && !/^\d{6}$/.test(newWorkerPin)) { setError('عيّن للعامل PIN من 6 أرقام قبل إنشاء الحساب.'); return; }
     if (isSupervisor && !navigator.onLine) { setError('إنشاء العامل مع تعيين PIN يتطلب اتصالاً بالإنترنت لحماية الرمز السري وعدم حفظه مكشوفاً على الهاتف.'); return; }
