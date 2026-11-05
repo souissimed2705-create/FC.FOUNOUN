@@ -32,7 +32,8 @@ jobs:
         shell: bash
         run: |
           npm audit --json > npm-audit.json || true
-          node --input-type=module -e "import fs from 'node:fs'; const audit = JSON.parse(fs.readFileSync('npm-audit.json', 'utf8')); const items = Object.entries(audit.vulnerabilities || {}).map(([name, item]) => ({ name, severity: item.severity, range: item.range, fixAvailable: item.fixAvailable, advisories: (item.via || []).map(via => typeof via === 'string' ? via : via.title) })); console.log('Dependency audit summary:', JSON.stringify(audit.metadata?.vulnerabilities || {})); for (const item of items) console.log(JSON.stringify(item));"
+          node --input-type=module -e "import fs from 'node:fs'; const audit = JSON.parse(fs.readFileSync('npm-audit.json', 'utf8')); const items = Object.entries(audit.vulnerabilities || {}).map(([name, item]) => ({ name, severity: item.severity, range: item.range, fixAvailable: item.fixAvailable, effects: item.effects, nodes: item.nodes, advisories: (item.via || []).map(via => typeof via === 'string' ? via : via.title) })); console.log('Dependency audit summary:', JSON.stringify(audit.metadata?.vulnerabilities || {})); for (const item of items) console.log(JSON.stringify(item));"
+          npm ls @grpc/grpc-js @firebase/firestore @firebase/firestore-compat firebase @rollup/plugin-node-resolve deepmerge glob minimatch vite-plugin-pwa workbox-build --all || true
       - name: TypeScript check
         run: npm run lint
       - name: Unit and security tests
