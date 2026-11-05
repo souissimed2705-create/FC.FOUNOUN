@@ -1,13 +1,14 @@
 import { auth } from './firebase';
+import { enqueueOfflineMutation, listOfflineMutations, deleteOfflineMutation } from '../utils/offlineQueue';
 import type { OperationsResponse, ProgressPayload, TaskPayload, TaskRecord, WorkerPayload, WorkerRecord, ChatMessage, MachineCycleRecord, ManagementAccountRecord, ContactRecord } from '../types/operations';
 
 const BASE = ((import.meta.env.VITE_WORKER_URL as string | undefined) || 'https://shiny-bird-56fc.souissimed2705.workers.dev').replace(/\/$/, '');
 const QUEUE_KEY_PREFIX = 'fc-founoun-offline-operations-v2';
 function currentQueueKey() { return `${QUEUE_KEY_PREFIX}:${auth.currentUser?.uid || 'anonymous'}`; }
 
-async function token() { if (!auth.currentUser) throw new Error('يجب تسجيل الدخول أولاً.'); return auth.currentUser.getIdToken(false); }
-async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
-  const response = await fetch(`${BASE}${path}`, { ...init, headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${await token()}`, ...(init.headers || {}) } });
+async function token(expectedUid?: string) { const user = auth.currentUser; if (!user || (expectedUid && user.uid !== expectedUid)) throw new Error('تغير حساب الدخول؛ أُوقفت المزامنة لحماية بيانات المستخدم.'); return user.getIdToken(false); }
+async function request<T>(path: string, init: RequestInit = {}, expectedUid?: string): Promise<T> {
+  const response = await fetch(`${BASE}${path}`, { ...init, headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${await token(expectedUid)}`, ...(init.headers || {}) } });
   const body = await response.json().catch(() => null);
   if (!response.ok || !body?.success) throw new Error(body?.error || `فشل الطلب (${response.status})`);
   // Normalize the Worker named-resource responses to the data shape consumed by the UI.
@@ -49,11 +50,33 @@ export const listMyMachineCycles = (pageToken?: string | null) => {
 };
 export const submitMachineCycle = (count: number, photo: string, recordedAt: string) => request<OperationsResponse<MachineCycleRecord>>('/api/worker/cycles', { method: 'POST', body: JSON.stringify({ count, photo, recordedAt }) });
 
-type QueuedMutation = { id: string; path: string; init: RequestInit; createdAt: string };
-export function queueMutation(path: string, init: RequestInit) { if (!auth.currentUser) throw new Error('لا يمكن حفظ عملية دون اتصال قبل تسجيل الدخول.'); const queue = readQueue(); queue.push({ id: crypto.randomUUID(), path, init, createdAt: new Date().toISOString() }); localStorage.setItem(currentQueueKey(), JSON.stringify(queue)); }
-function readQueue(): QueuedMutation[] { try { return JSON.parse(localStorage.getItem(currentQueueKey()) || '[]'); } catch { return []; } }
-export function queuedMutationCount() { return readQueue().length; }
-export async function flushQueuedMutations() { const queue = readQueue(); if (!queue.length || !navigator.onLine) return 0; let flushed = 0; for (const item of queue) { try { await request(item.path, item.init); flushed++; } catch { break; } } if (flushed) localStorage.setItem(currentQueueKey(), JSON.stringify(queue.slice(flushed))); return flushed; }
+export async function queueMutation(path: string, init: RequestInit): Promise<void> {
+  const user = auth.currentUser;
+  if (!user) throw new Error('لا يمكن حفظ عملية دون اتصال قبل تسجيل الدخول.');
+  await enqueueOfflineMutation(user.uid, path, init);
+}
+export async function queuedMutationCount(): Promise<number> {
+  const user = auth.currentUser;
+  if (!user) return 0;
+  return (await listOfflineMutations(user.uid)).length;
+}
+export async function flushQueuedMutations(): Promise<number> {
+  const userId = auth.currentUser?.uid;
+  if (!userId || !navigator.onLine) return 0;
+  const queue = await listOfflineMutations(userId);
+  let flushed = 0;
+  for (const item of queue) {
+    if (!navigator.onLine || auth.currentUser?.uid !== userId) break;
+    try {
+      await request(item.path, item.init, userId);
+      await deleteOfflineMutation(item.id);
+      flushed++;
+    } catch {
+      break;
+    }
+  }
+  return flushed;
+}
 
 export async function managementLogin(name: string, code: string, role: 'admin' | 'responsible'): Promise<{ customToken: string; user: { uid: string; displayName: string; role: string } }> {
   const response = await fetch(`${BASE}/api/management-auth/login`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name, code, role }) });
