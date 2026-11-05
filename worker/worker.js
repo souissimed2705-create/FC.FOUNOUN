@@ -88,6 +88,8 @@ export default {
     const directMessagesMatch = cleanPath.match(/^\/api\/direct-messages\/([^/]+)$/);
     const directMessagesRoute = directMessagesMatch && ['GET', 'POST'].includes(request.method);
     const workerCyclesRoute = cleanPath === '/api/worker/cycles' && ['GET', 'POST'].includes(request.method);
+    const workerCyclePhotoMatch = cleanPath.match(/^\/api\/worker\/cycles\/([^/]+)\/photo$/);
+    const workerCyclePhotoRoute = Boolean(workerCyclePhotoMatch && request.method === 'GET');
     const notificationsListRoute = cleanPath === '/api/notifications' && request.method === 'GET';
     const notificationReadMatch = cleanPath.match(/^\/api\/notifications\/([^/]+)\/read$/);
     const notificationReadRoute = Boolean(notificationReadMatch && request.method === 'PUT');
@@ -97,14 +99,14 @@ export default {
     if (managementRoute?.error) {
       return jsonResponse({ success: false, error: managementRoute.error.message, code: managementRoute.error.code }, 400, corsHeaders);
     }
-    if (!managementRoute && !workerLoginRoute && !managementLoginRoute && !managementAccountsRoute && !managementAccountActionRoute && !workerTasksRoute && !workerProgressRoute && !workerTaskStatusRoute && !workerMessagesRoute && !contactsRoute && !directMessagesRoute && !workerCyclesRoute && !managementCyclesRoute && !managementCyclePhotoRoute && !adminMessagesRoute && !notificationsListRoute && !notificationReadRoute && !cleanPath.startsWith('/api/models')) {
+    if (!managementRoute && !workerLoginRoute && !managementLoginRoute && !managementAccountsRoute && !managementAccountActionRoute && !workerTasksRoute && !workerProgressRoute && !workerTaskStatusRoute && !workerMessagesRoute && !contactsRoute && !directMessagesRoute && !workerCyclesRoute && !workerCyclePhotoRoute && !managementCyclesRoute && !managementCyclePhotoRoute && !adminMessagesRoute && !notificationsListRoute && !notificationReadRoute && !cleanPath.startsWith('/api/models')) {
       return jsonResponse({ success: false, error: 'المسار المطلوب غير موجود', code: 'not_found' }, 404, corsHeaders);
     }
 
     let modelIdParam = null;
     const modelsPrefix = '/api/models';
 
-    if (managementRoute || workerLoginRoute || managementLoginRoute || managementAccountsRoute || managementAccountActionRoute || workerTasksRoute || workerProgressRoute || workerTaskStatusRoute || workerMessagesRoute || contactsRoute || directMessagesRoute || workerCyclesRoute || managementCyclesRoute || managementCyclePhotoRoute || adminMessagesRoute || notificationsListRoute || notificationReadRoute) {
+    if (managementRoute || workerLoginRoute || managementLoginRoute || managementAccountsRoute || managementAccountActionRoute || workerTasksRoute || workerProgressRoute || workerTaskStatusRoute || workerMessagesRoute || contactsRoute || directMessagesRoute || workerCyclesRoute || workerCyclePhotoRoute || managementCyclesRoute || managementCyclePhotoRoute || adminMessagesRoute || notificationsListRoute || notificationReadRoute) {
       // Validated API routes are dispatched after authentication.
     } else if (cleanPath === modelsPrefix) {
       if (request.method !== 'GET' && request.method !== 'POST') {
@@ -201,7 +203,7 @@ export default {
         if (contactsRoute) return await handleListContacts(callerUid, projectId, saAccessToken, corsHeaders);
         return await handleDirectMessages(request, safeDecodeUriSegment(directMessagesMatch[1]), callerUid, callerRole, projectId, saAccessToken, corsHeaders);
       }
-      if (workerTasksRoute || workerProgressRoute || workerTaskStatusRoute || workerMessagesRoute || workerCyclesRoute) {
+      if (workerTasksRoute || workerProgressRoute || workerTaskStatusRoute || workerMessagesRoute || workerCyclesRoute || workerCyclePhotoRoute) {
         if (decodedToken.role !== 'worker' || decodedToken.workerId !== callerUid) {
           throw createHttpError('هذه الخدمة مخصصة لحساب مشرف العمال فقط', 403, 'worker_only');
         }
@@ -212,6 +214,7 @@ export default {
         if (workerTasksRoute) return await handleWorkerListTasks(callerUid, projectId, saAccessToken, corsHeaders);
         if (workerMessagesRoute) return await handleWorkerMessages(request, callerUid, projectId, saAccessToken, corsHeaders);
         if (workerCyclesRoute) return await handleWorkerCycles(request, callerUid, projectId, saAccessToken, corsHeaders);
+        if (workerCyclePhotoRoute) return await handleWorkerCyclePhoto(safeDecodeUriSegment(workerCyclePhotoMatch[1]), callerUid, projectId, saAccessToken, corsHeaders);
         if (workerTaskStatusRoute) return await handleWorkerTaskStatus(request, safeDecodeUriSegment(workerTaskStatusMatch[1]), callerUid, projectId, saAccessToken, corsHeaders);
         const taskId = safeDecodeUriSegment(workerProgressMatch[1]);
         return await handleWorkerTaskProgress(request, taskId, callerUid, projectId, saAccessToken, corsHeaders);
@@ -1487,6 +1490,16 @@ async function handleWorkerCycles(request, workerId, projectId, accessToken, cor
   return jsonResponse({ success: true, data: { ...record, photo: undefined } }, existing ? 200 : 201, corsHeaders);
 }
 
+
+async function handleWorkerCyclePhoto(id, workerId, projectId, accessToken, corsHeaders) {
+  if (!/^mc_[0-9]{8}_[123]_(?:day|night)$/.test(id)) throw createHttpError('معرّف تقرير الدورات غير صالح', 400, 'invalid_cycle_id');
+  const doc = await getFirestoreDoc(projectId, accessToken, `machine_cycles/${id}`);
+  if (!doc) throw createHttpError('تقرير الدورات غير موجود', 404, 'cycle_report_not_found');
+  const record = convertFromFirestoreFields(doc.fields || {});
+  if (record.workerId !== workerId) throw createHttpError('لا يمكنك عرض صورة تقرير عامل آخر', 403, 'cycle_photo_forbidden');
+  if (typeof record.photo !== 'string' || !record.photo.startsWith('data:image/')) throw createHttpError('صورة العداد غير متوفرة في التقرير المحفوظ', 404, 'cycle_photo_not_found');
+  return jsonResponse({ success: true, data: { id, photo: record.photo } }, 200, corsHeaders);
+}
 
 async function handleCyclePhoto(id, projectId, accessToken, corsHeaders) {
   if (!/^mc_[0-9]{8}_[123]_(?:day|night)$/.test(id)) throw createHttpError('معرّف تقرير الدورات غير صالح', 400, 'invalid_cycle_id');
