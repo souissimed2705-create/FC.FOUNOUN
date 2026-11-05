@@ -2747,6 +2747,8 @@ export function getAllowedOrigins(env) {
   const allowed = new Set([
     'https://fc-founoun.web.app',
     'https://fc-founoun.firebaseapp.com',
+    'https://souissimed2705-create.github.io',
+    'https://fc-founoun.pages.dev',
     'https://deploy-preview-3--fc-founoun.netlify.app',
     'http://localhost:3000',
     'http://localhost:5173',

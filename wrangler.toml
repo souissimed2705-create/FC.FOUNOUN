@@ -1,0 +1,11 @@
+name = "shiny-bird-56fc"
+main = "worker/worker.js"
+compatibility_date = "2024-04-01"
+
+# Keep existing production secrets in Cloudflare; never commit their values.
+# Required secrets: FIREBASE_SERVICE_ACCOUNT and APP_URL/ALLOWED_ORIGINS.
+[vars]
+PROJECT_ID = "fc-founoun"
+
+[previews.vars]
+PROJECT_ID = "fc-founoun-preview"
