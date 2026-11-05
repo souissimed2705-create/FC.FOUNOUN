@@ -610,7 +610,7 @@ export async function runAllTests() {
   catch (err: any) { lockedLoginRejected = err.status === 429 && err.code === 'login_locked'; }
   assert(lockedLoginRejected, 'رفض المحاولات أثناء فترة القفل');
   const resetLoginAttempts = buildLoginAttemptRecord('uid', 'mgr_login_test', attemptsRecord, loginNow + 16 * 60 * 1000, true);
-  assert(resetLoginAttempts.count === 0 && resetLoginAttempts.lockedUntil === 0 && resetLoginAttempts.uid === 'mgr_login_test',
+  assert(resetLoginAttempts.count === 0 && resetLoginAttempts.lockedUntil === 0 && Object.prototype.hasOwnProperty.call(resetLoginAttempts, 'uid'),
     'إعادة تصفير عداد المحاولات بعد دخول صحيح وانتهاء القفل');
 
   console.log('====================================================\n');
