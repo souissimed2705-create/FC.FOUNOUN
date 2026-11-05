@@ -146,7 +146,7 @@ export const OperationsPanel: React.FC<Props> = ({ initialSection, admin }) => {
 
 
 
-  const runMutation = async (fn: () => Promise<unknown>, fallback?: { path: string; init: RequestInit }) => {
+  const runMutation = async (fn: () => Promise<unknown>, fallback?: { path: string; init: RequestInit }, onSuccess?: () => void): Promise<boolean> => {
     setError(null); setNotice(null);
     try {
       if (!navigator.onLine && fallback) {
@@ -154,11 +154,14 @@ export const OperationsPanel: React.FC<Props> = ({ initialSection, admin }) => {
         await queueMutation(fallback.path, fallback.init);
         setPending(await queuedMutationCount());
         setNotice('لا يوجد اتصال؛ حُفظت العملية وستتم مزامنتها عند عودة الاتصال.');
-        return;
+        onSuccess?.();
+        return true;
       }
       await fn();
       setNotice('تم الحفظ بنجاح.');
       await refresh();
+      onSuccess?.();
+      return true;
     } catch (e) {
       if (fallback && (e instanceof TypeError || !navigator.onLine)) {
         try {
@@ -166,25 +169,29 @@ export const OperationsPanel: React.FC<Props> = ({ initialSection, admin }) => {
           await queueMutation(fallback.path, fallback.init);
           setPending(await queuedMutationCount());
           setNotice('انقطع الاتصال أثناء الحفظ؛ حُفظت العملية على الهاتف وستتم مزامنتها عند عودة الاتصال.');
-          return;
+          onSuccess?.();
+          return true;
         } catch (queueError) {
           setError(queueError instanceof Error ? queueError.message : 'تعذر حفظ العملية محلياً.');
-          return;
+          return false;
         }
       }
       setError(e instanceof Error ? e.message : 'فشلت العملية.');
+      return false;
     }
   };
 
   const addWorker = (e: React.FormEvent) => {
     e.preventDefault();
-    if (!name.trim()) { setError('اسم العامل مطلوب.'); return; }
+    // Capture the submitted value once; do not clear the controlled input until
+    // the server confirms the create (or the offline queue confirms it saved).
+    const workerName = String(name ?? '').trim();
+    if (!workerName) { setError('اسم العامل مطلوب.'); return; }
     if (isSupervisor && !/^\d{6}$/.test(newWorkerPin)) { setError('عيّن للعامل PIN من 6 أرقام قبل إنشاء الحساب.'); return; }
     if (isSupervisor && !navigator.onLine) { setError('إنشاء العامل مع تعيين PIN يتطلب اتصالاً بالإنترنت لحماية الرمز السري وعدم حفظه مكشوفاً على الهاتف.'); return; }
-    const payload = { name: name.trim(), ...(!isResponsible ? { phone: phone.trim() } : {}), machineNumber: Number(machineNumber) as 1 | 2 | 3, shift, ...(isSupervisor ? { pin: newWorkerPin } : {}), clientMutationId: crypto.randomUUID() };
+    const payload = { name: workerName, ...(!isResponsible ? { phone: phone.trim() } : {}), machineNumber: Number(machineNumber) as 1 | 2 | 3, shift, ...(isSupervisor ? { pin: newWorkerPin } : {}), clientMutationId: crypto.randomUUID() };
     const fallback = !isSupervisor ? { path: '/api/workers', init: { method: 'POST' as const, body: JSON.stringify(payload) } } : undefined;
-    void runMutation(() => createWorker(payload), fallback);
-    setName(''); setPhone(''); setNewWorkerPin('');
+    void runMutation(() => createWorker(payload), fallback, () => { setName(''); setPhone(''); setNewWorkerPin(''); });
   };
 
   const addTask = (e: React.FormEvent) => {
@@ -248,7 +255,7 @@ export const OperationsPanel: React.FC<Props> = ({ initialSection, admin }) => {
     {section === 'workers' && canManageWorkers && <div className="space-y-4">
       <h3 className="font-bold text-[#F5D77F]">إدارة العمال ورموز الدخول</h3>
       <form onSubmit={addWorker} className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-        <label className="block text-xs text-gray-300">اسم مشرف العمال<input className="field mt-1 w-full" placeholder="اكتب اسم العامل" value={name} onChange={e => setName(e.target.value)} /></label>
+        <label className="block text-xs text-gray-300">اسم مشرف العمال<input className="field mt-1 w-full" placeholder="اكتب اسم العامل" value={name} onChange={e => { setName(e.target.value); if (e.target.value.trim()) setError(null); }} /></label>
         {!isResponsible && <label className="block text-xs text-gray-300">رقم الهاتف (اختياري)<input className="field mt-1 w-full" placeholder="رقم الهاتف" value={phone} onChange={e => setPhone(e.target.value)} /></label>}
         <label className="block text-xs text-gray-300">تعيين المكينة<select className="field mt-1 w-full" value={machineNumber} onChange={e => setMachineNumber(e.target.value as '1' | '2' | '3')}><option value="1">المكينة 1</option><option value="2">المكينة 2</option><option value="3">المكينة 3</option></select></label>
         <label className="block text-xs text-gray-300">تعيين الوردية<select className="field mt-1 w-full" value={shift} onChange={e => setShift(e.target.value as 'day' | 'night')}><option value="day">الوردية النهارية</option><option value="night">الوردية الليلية</option></select></label>
