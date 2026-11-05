@@ -2771,8 +2771,13 @@ export function getAllowedOrigins(env) {
 
 export function isOriginAllowed(origin, env) {
   if (!origin) return false;
+  const normalizedOrigin = origin.trim().replace(/\/+$/, '');
   const allowed = getAllowedOrigins(env);
-  return allowed.has(origin.trim().replace(/\/+$/, ''));
+  if (allowed.has(normalizedOrigin)) return true;
+
+  // Allow only single-label Cloudflare Pages previews for this exact project.
+  // This keeps unrelated domains and other Pages projects blocked by CORS.
+  return /^https:\/\/[a-z0-9-]+\.fc-founoun\.pages\.dev$/i.test(normalizedOrigin);
 }
 
 export function getCorsHeaders(origin, isAllowed) {
