@@ -1929,7 +1929,7 @@ export async function normalizeModelName(rawName) {
 
 const PIN_PBKDF2_ITERATIONS = 100000;
 
-async function computePinPbkdf2(salt, pin) {
+export async function computePinPbkdf2(salt, pin) {
   const material = await crypto.subtle.importKey('raw', new TextEncoder().encode(pin), 'PBKDF2', false, ['deriveBits']);
   const bits = await crypto.subtle.deriveBits(
     { name: 'PBKDF2', salt: new TextEncoder().encode(salt), iterations: PIN_PBKDF2_ITERATIONS, hash: 'SHA-256' },
@@ -1939,7 +1939,7 @@ async function computePinPbkdf2(salt, pin) {
   return Array.from(new Uint8Array(bits)).map(byte => byte.toString(16).padStart(2, '0')).join('');
 }
 
-async function computeStoredPinHash(record, pin, label) {
+export async function computeStoredPinHash(record, pin, label) {
   if (record?.pin_algo === 'pbkdf2-sha256-v1') {
     throw createHttpError(`تم تحديث حماية رموز الدخول. يلزم إعادة تعيين ${label} من حساب المشرف العام قبل تسجيل الدخول.`, 409, 'pin_reset_required');
   }
