@@ -1250,6 +1250,42 @@ async function handleDirectMessages(request, otherUid, callerUid, callerRole, pr
   return jsonResponse({ success: true, data: message }, 201, corsHeaders);
 }
 
+export function getCycleReportWriteDecision(previous, incoming) {
+  if (!previous || typeof previous !== 'object') return 'write';
+
+  const previousTime = Date.parse(previous.recordedAt || '');
+  const incomingTime = Date.parse(incoming.recordedAt || '');
+  if (!Number.isFinite(incomingTime)) {
+    throw createHttpError('وقت تسجيل التقرير غير صالح', 400, 'invalid_cycle_recorded_at');
+  }
+
+  // Legacy reports without a valid recordedAt can still be updated.
+  if (!Number.isFinite(previousTime)) return 'write';
+
+  if (previousTime > incomingTime) {
+    throw createHttpError(
+      'يوجد تقرير أحدث محفوظ لهذا اليوم؛ رُفض التقرير القديم القادم من المزامنة',
+      409,
+      'stale_cycle_report'
+    );
+  }
+
+  if (previousTime === incomingTime) {
+    const isSameSubmission =
+      previous.workerId === incoming.workerId &&
+      previous.count === incoming.count &&
+      previous.photo === incoming.photo;
+    if (isSameSubmission) return 'duplicate';
+    throw createHttpError(
+      'يوجد تقرير مختلف مسجل بنفس وقت التسجيل؛ لم يتم استبدال التقرير المحفوظ',
+      409,
+      'cycle_report_timestamp_conflict'
+    );
+  }
+
+  return 'write';
+}
+
 export function resolveCycleRecordedAt(clientRecordedAt, serverNow = new Date()) {
   if (clientRecordedAt === undefined || clientRecordedAt === null || clientRecordedAt === '') {
     return serverNow.toISOString();
@@ -1305,9 +1341,15 @@ async function handleWorkerCycles(request, workerId, projectId, accessToken, cor
   const id = `mc_${date.replace(/-/g, '')}_${machineNumber}_${shift}`;
   const path = `machine_cycles/${id}`;
   const existing = await getFirestoreDoc(projectId, accessToken, path);
+  let previous = null;
   if (existing) {
-    const previous = convertFromFirestoreFields(existing.fields || {});
+    previous = convertFromFirestoreFields(existing.fields || {});
     if (previous.workerId !== workerId) throw createHttpError('تم تسجيل تقرير هذه المكينة والوردية لهذا اليوم بواسطة حساب آخر', 409, 'cycle_report_exists');
+    const writeDecision = getCycleReportWriteDecision(previous, { workerId, count: payload.count, photo, recordedAt });
+    if (writeDecision === 'duplicate') {
+      const { photo: _storedPhoto, ...publicPrevious } = previous;
+      return jsonResponse({ success: true, data: { ...publicPrevious, hasPhoto: previous.hasPhoto !== false } }, 200, corsHeaders);
+    }
   }
   const record = {
     id, machineNumber, shift, date, count: payload.count, photo, hasPhoto: true,
