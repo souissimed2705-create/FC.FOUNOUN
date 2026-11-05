@@ -2,7 +2,7 @@ import React, { useCallback, useEffect, useState } from 'react';
 import { signOut } from 'firebase/auth';
 import { Home, ClipboardList, LogOut, MessageCircle, RefreshCw, Gauge, Package } from 'lucide-react';
 import { auth } from '../lib/firebase';
-import { listMyTasks, recordMyProgress, updateMyTaskStatus, listMyMachineCycles, submitMachineCycle, queueMutation, flushQueuedMutations, queuedMutationCount } from '../lib/operationsApi';
+import { listMyTasks, recordMyProgress, updateMyTaskStatus, listMyMachineCycles, getMyMachineCyclePhoto, submitMachineCycle, queueMutation, flushQueuedMutations, queuedMutationCount } from '../lib/operationsApi';
 import { PrivateMessagesPanel } from './PrivateMessagesPanel';
 import { ModelsPanel } from './ModelsPanel';
 import { optimizeAndEncodeImage } from '../utils/imageOptimizer';
@@ -38,6 +38,7 @@ export const WorkerDashboard: React.FC<Props> = ({ worker }) => {
   const [cycleCount, setCycleCount] = useState('');
   const [cyclePhoto, setCyclePhoto] = useState('');
   const [cyclePhotoName, setCyclePhotoName] = useState('');
+  const [selectedCyclePhoto, setSelectedCyclePhoto] = useState<{ id: string; photo: string } | null>(null);
   const [quantities, setQuantities] = useState<Record<string, string>>({});
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
@@ -247,10 +248,12 @@ export const WorkerDashboard: React.FC<Props> = ({ worker }) => {
       </form>
       <div className="space-y-2"><div className="flex items-center justify-between"><h4 className="font-semibold">سجل تقاريري السابقة</h4><button className="secondary-button" onClick={() => void refreshCycles()}>تحديث</button></div>
         {!cycles.length && <p className="py-4 text-center text-xs text-gray-500">لا توجد تقارير مسجلة بعد.</p>}
-        {cycles.map(report => <article key={report.id} className="rounded-xl border border-white/10 bg-[#080808] p-3"><div className="flex justify-between gap-2"><b>المكينة {report.machineNumber} · {report.shift === 'day' ? 'النهار' : 'الليل'}</b><strong className="text-[#F5D77F]">{report.count.toLocaleString('ar-TN')} دورة</strong></div><p className="mt-1 text-xs text-gray-400">{report.date} · {new Date(report.recordedAt).toLocaleTimeString('ar-TN', { timeZone: 'Africa/Tunis' })}</p></article>)}
+        {cycles.map(report => <article key={report.id} className="rounded-xl border border-white/10 bg-[#080808] p-3"><div className="flex justify-between gap-2"><b>المكينة {report.machineNumber} · {report.shift === 'day' ? 'النهار' : 'الليل'}</b><strong className="text-[#F5D77F]">{report.count.toLocaleString('ar-TN')} دورة</strong></div><p className="mt-1 text-xs text-gray-400">{report.date} · {new Date(report.recordedAt).toLocaleTimeString('ar-TN', { timeZone: 'Africa/Tunis' })}</p>{report.hasPhoto && <button className="secondary-button mt-2" onClick={async () => { try { const result = await getMyMachineCyclePhoto(report.id); setSelectedCyclePhoto(result.data); setError(''); } catch (e) { setError(e instanceof Error ? e.message : 'تعذر عرض صورة العداد المحفوظة.'); } }}>عرض الصورة المحفوظة</button>}</article>)}
         {cycleNextPageToken && <button className="secondary-button w-full" disabled={loadingMoreCycles} onClick={() => void loadMoreCycles()}>{loadingMoreCycles ? 'جارٍ تحميل التقارير...' : 'تحميل التقارير الأقدم'}</button>}
       </div>
     </div>}
+
+    {selectedCyclePhoto && <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/90 p-4" role="dialog" aria-modal="true" aria-label="صورة العداد المحفوظة" onClick={() => setSelectedCyclePhoto(null)}><div className="max-h-[90vh] max-w-3xl rounded-xl border border-[#D4AF37]/40 bg-[#111] p-3" onClick={e => e.stopPropagation()}><div className="mb-2 flex justify-between"><b className="text-[#F5D77F]">صورة العداد المحفوظة</b><button className="secondary-button" onClick={() => setSelectedCyclePhoto(null)}>إغلاق</button></div><img src={selectedCyclePhoto.photo} alt="صورة عداد المكينة المحفوظة" className="max-h-[78vh] w-auto rounded-lg object-contain" /></div></div>}
 
     {page === 'messages' && <PrivateMessagesPanel />}
   </section>;
