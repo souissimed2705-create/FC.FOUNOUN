@@ -17,9 +17,9 @@ export default defineConfig(() => {
         includeAssets: ['favicon.png', 'apple-touch-icon.png', 'icon.svg'],
         manifest: {
           id: '/',
-          name: 'FC.FOUNOUN – فنون للأحذية',
-          short_name: 'FC.FOUNOUN',
-          description: 'بوابة تسجيل دخول المسؤول الرئيسي لمتجر FC.FOUNOUN للأحذية',
+          name: 'FONOUN CHAUSSURES – فنون للأحذية',
+          short_name: 'FONOUN',
+          description: 'تطبيق فنون للأحذية لإدارة الموديلات ومهام الإنتاج وتقارير المكائن والمراسلات الخاصة.',
           theme_color: '#0A0A0A',
           background_color: '#0A0A0A',
           display: 'standalone',

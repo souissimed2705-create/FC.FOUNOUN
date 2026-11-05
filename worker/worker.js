@@ -73,20 +73,35 @@ export default {
     // 2. Strict API Path Routing
     const managementRoute = parseManagementRoute(cleanPath, request.method);
     const workerLoginRoute = cleanPath === '/api/worker-auth/login' && request.method === 'POST';
+    const managementLoginRoute = cleanPath === '/api/management-auth/login' && request.method === 'POST';
+    const managementAccountsRoute = cleanPath === '/api/management-accounts' && ['GET', 'POST'].includes(request.method);
+    const managementAccountMatch = cleanPath.match(/^\/api\/management-accounts\/([^/]+)(?:\/(code))?$/);
+    const managementAccountActionRoute = managementAccountMatch && ((managementAccountMatch[2] && request.method === 'PUT') || (!managementAccountMatch[2] && ['PUT', 'DELETE'].includes(request.method)));
     const workerTasksRoute = cleanPath === '/api/worker/tasks' && request.method === 'GET';
     const workerProgressMatch = cleanPath.match(/^\/api\/worker\/tasks\/([^/]+)\/progress$/);
     const workerProgressRoute = workerProgressMatch && request.method === 'POST';
+    const workerTaskStatusMatch = cleanPath.match(/^\/api\/worker\/tasks\/([^/]+)\/status$/);
+    const workerTaskStatusRoute = workerTaskStatusMatch && request.method === 'PUT';
+    const workerMessagesRoute = false; // Legacy shared worker-admin chat is disabled; use participant-only direct messages.
+    const adminMessagesRoute = false;
+    const contactsRoute = cleanPath === '/api/contacts' && request.method === 'GET';
+    const directMessagesMatch = cleanPath.match(/^\/api\/direct-messages\/([^/]+)$/);
+    const directMessagesRoute = directMessagesMatch && ['GET', 'POST'].includes(request.method);
+    const workerCyclesRoute = cleanPath === '/api/worker/cycles' && ['GET', 'POST'].includes(request.method);
+    const managementCyclesRoute = cleanPath === '/api/cycles' && request.method === 'GET';
+    const cyclePhotoMatch = cleanPath.match(/^\/api\/cycles\/([^/]+)\/photo$/);
+    const managementCyclePhotoRoute = cyclePhotoMatch && request.method === 'GET';
     if (managementRoute?.error) {
       return jsonResponse({ success: false, error: managementRoute.error.message, code: managementRoute.error.code }, 400, corsHeaders);
     }
-    if (!managementRoute && !workerLoginRoute && !workerTasksRoute && !workerProgressRoute && !cleanPath.startsWith('/api/models')) {
+    if (!managementRoute && !workerLoginRoute && !managementLoginRoute && !managementAccountsRoute && !managementAccountActionRoute && !workerTasksRoute && !workerProgressRoute && !workerTaskStatusRoute && !workerMessagesRoute && !contactsRoute && !directMessagesRoute && !workerCyclesRoute && !managementCyclesRoute && !managementCyclePhotoRoute && !adminMessagesRoute && !cleanPath.startsWith('/api/models')) {
       return jsonResponse({ success: false, error: 'المسار المطلوب غير موجود', code: 'not_found' }, 404, corsHeaders);
     }
 
     let modelIdParam = null;
     const modelsPrefix = '/api/models';
 
-    if (managementRoute || workerLoginRoute || workerTasksRoute || workerProgressRoute) {
+    if (managementRoute || workerLoginRoute || managementLoginRoute || managementAccountsRoute || managementAccountActionRoute || workerTasksRoute || workerProgressRoute || workerTaskStatusRoute || workerMessagesRoute || contactsRoute || directMessagesRoute || workerCyclesRoute || managementCyclesRoute || managementCyclePhotoRoute || adminMessagesRoute) {
       // Validated API routes are dispatched after authentication.
     } else if (cleanPath === modelsPrefix) {
       if (request.method !== 'GET' && request.method !== 'POST') {
@@ -142,9 +157,10 @@ export default {
       // 3. Authenticate Firebase ID Token
       const serviceAccount = parseServiceAccount(env);
       const projectId = env.PROJECT_ID || serviceAccount.project_id || 'fc-founoun';
-      if (workerLoginRoute) {
+      if (workerLoginRoute || managementLoginRoute) {
         const saAccessToken = await getServiceAccountAccessToken(serviceAccount);
-        return await handleWorkerLogin(request, env, projectId, saAccessToken, corsHeaders);
+        if (workerLoginRoute) return await handleWorkerLogin(request, env, projectId, saAccessToken, corsHeaders);
+        return await handleManagementLogin(request, env, projectId, saAccessToken, corsHeaders);
       }
 
       const authHeader = request.headers.get('Authorization') || '';
@@ -161,23 +177,67 @@ export default {
       const callerUid = decodedToken.sub;
 
       const saAccessToken = await getServiceAccountAccessToken(serviceAccount);
-      if (workerTasksRoute || workerProgressRoute) {
+      if (contactsRoute || directMessagesRoute) {
+        let callerRole;
+        if (decodedToken.role === 'worker' && decodedToken.workerId === callerUid) {
+          const workerDoc = await getFirestoreDoc(projectId, saAccessToken, `workers/${callerUid}`);
+          if (!workerDoc || convertFromFirestoreFields(workerDoc.fields || {}).status !== 'active') throw createHttpError('حساب مشرف العمال غير نشط', 403, 'worker_inactive');
+          callerRole = 'worker';
+        } else {
+          callerRole = await verifyManagementRole(callerUid, projectId, saAccessToken);
+        }
+        if (contactsRoute) return await handleListContacts(callerUid, projectId, saAccessToken, corsHeaders);
+        return await handleDirectMessages(request, safeDecodeUriSegment(directMessagesMatch[1]), callerUid, callerRole, projectId, saAccessToken, corsHeaders);
+      }
+      if (workerTasksRoute || workerProgressRoute || workerTaskStatusRoute || workerMessagesRoute || workerCyclesRoute) {
         if (decodedToken.role !== 'worker' || decodedToken.workerId !== callerUid) {
-          throw createHttpError('هذه الخدمة مخصصة لحساب العامل فقط', 403, 'worker_only');
+          throw createHttpError('هذه الخدمة مخصصة لحساب مشرف العمال فقط', 403, 'worker_only');
+        }
+        const activeWorkerDoc = await getFirestoreDoc(projectId, saAccessToken, `workers/${callerUid}`);
+        if (!activeWorkerDoc || convertFromFirestoreFields(activeWorkerDoc.fields || {}).status !== 'active') {
+          throw createHttpError('تم تجميد حساب مشرف العمال أو تعطيله', 403, 'worker_inactive');
         }
         if (workerTasksRoute) return await handleWorkerListTasks(callerUid, projectId, saAccessToken, corsHeaders);
+        if (workerMessagesRoute) return await handleWorkerMessages(request, callerUid, projectId, saAccessToken, corsHeaders);
+        if (workerCyclesRoute) return await handleWorkerCycles(request, callerUid, projectId, saAccessToken, corsHeaders);
+        if (workerTaskStatusRoute) return await handleWorkerTaskStatus(request, safeDecodeUriSegment(workerTaskStatusMatch[1]), callerUid, projectId, saAccessToken, corsHeaders);
         const taskId = safeDecodeUriSegment(workerProgressMatch[1]);
         return await handleWorkerTaskProgress(request, taskId, callerUid, projectId, saAccessToken, corsHeaders);
       }
       if (decodedToken.role === 'worker') {
-        throw createHttpError('حساب العامل لا يملك صلاحيات الإدارة', 403, 'worker_admin_forbidden');
+        if (request.method === 'GET' && cleanPath.startsWith('/api/models')) {
+          const workerDoc = await getFirestoreDoc(projectId, saAccessToken, `workers/${callerUid}`);
+          if (!workerDoc || convertFromFirestoreFields(workerDoc.fields || {}).status !== 'active') throw createHttpError('حساب مشرف العمال غير نشط', 403, 'worker_inactive');
+          return await handleListModels(request, projectId, saAccessToken, corsHeaders);
+        }
+        throw createHttpError('حساب مشرف العمال لا يملك صلاحيات الإدارة', 403, 'worker_admin_forbidden');
       }
       // 4. Verify Super Admin RBAC via Firestore
-      await verifySuperAdminRole(callerUid, projectId, saAccessToken);
+      const callerRole = await verifyManagementRole(callerUid, projectId, saAccessToken);
+      if (managementRoute?.resource === 'workers') {
+        assertWorkerManagementPermission(callerRole, request.method, managementRoute.action);
+      }
+      if (managementRoute?.resource === 'tasks') {
+        assertTaskManagementPermission(callerRole);
+      }
+      
+      if (managementAccountsRoute || managementAccountActionRoute) {
+        assertSuperAdminManagementAccountsPermission(callerRole);
+        if (managementAccountsRoute && request.method === 'GET') return await handleListManagementAccounts(projectId, saAccessToken, corsHeaders);
+        if (managementAccountsRoute && request.method === 'POST') return await handleCreateManagementAccount(request, callerUid, projectId, saAccessToken, corsHeaders);
+        const accountId = safeDecodeUriSegment(managementAccountMatch[1]);
+        if (!/^mgr_[a-f0-9]{32}$/.test(accountId)) throw createHttpError('معرّف الحساب غير صالح', 400, 'invalid_management_account_id');
+        if (managementAccountMatch[2] === 'code') return await handleSetManagementCode(request, accountId, callerUid, projectId, saAccessToken, corsHeaders);
+        if (request.method === 'DELETE') return await handleFreezeManagementAccount(accountId, callerUid, projectId, saAccessToken, corsHeaders);
+        return await handleUpdateManagementAccount(request, accountId, callerUid, projectId, saAccessToken, corsHeaders);
+      }
+      if (adminMessagesRoute) return await handleManagementMessages(request, callerUid, callerRole, projectId, saAccessToken, corsHeaders);
+      if (managementCyclesRoute) return await handleListCycles(request, projectId, saAccessToken, corsHeaders);
+      if (managementCyclePhotoRoute) return await handleCyclePhoto(safeDecodeUriSegment(cyclePhotoMatch[1]), projectId, saAccessToken, corsHeaders);
 
       // 5. Dispatch Route Handlers
       if (managementRoute) {
-        return await dispatchManagementRoute(request, managementRoute, callerUid, projectId, saAccessToken, corsHeaders);
+        return await dispatchManagementRoute(request, managementRoute, callerUid, callerRole, projectId, saAccessToken, corsHeaders);
       }
 
       if (request.method === 'GET') {
@@ -241,14 +301,14 @@ function parseManagementRoute(path, method) {
   return { resource, id, action: suffix };
 }
 
-async function dispatchManagementRoute(request, route, callerUid, projectId, accessToken, corsHeaders) {
+async function dispatchManagementRoute(request, route, callerUid, callerRole, projectId, accessToken, corsHeaders) {
   if (route.resource === 'workers' && route.action === 'pin') {
     return handleSetWorkerPin(request, route.id, callerUid, projectId, accessToken, corsHeaders);
   }
   if (route.resource === 'workers') {
-    if (request.method === 'GET') return handleListResource(request, 'workers', projectId, accessToken, corsHeaders);
-    if (request.method === 'POST') return handleCreateResource(request, 'workers', callerUid, projectId, accessToken, corsHeaders);
-    if (request.method === 'PUT') return handleUpdateResource(request, 'workers', route.id, callerUid, projectId, accessToken, corsHeaders);
+    if (request.method === 'GET') return handleListResource(request, 'workers', projectId, accessToken, corsHeaders, callerRole);
+    if (request.method === 'POST') return handleCreateResource(request, 'workers', callerUid, projectId, accessToken, corsHeaders, callerRole);
+    if (request.method === 'PUT') return handleUpdateResource(request, 'workers', route.id, callerUid, projectId, accessToken, corsHeaders, callerRole);
     return handleDeleteResource(route.id, 'workers', projectId, accessToken, corsHeaders);
   }
   if (route.action === 'progress') {
@@ -261,8 +321,8 @@ async function dispatchManagementRoute(request, route, callerUid, projectId, acc
 }
 
 const RESOURCE_FIELDS = {
-  workers: ['name', 'phone', 'email', 'status', 'notes', 'role'],
-  tasks: ['title', 'description', 'status', 'priority', 'assignedWorkerId', 'assignedWorkerName', 'modelId', 'modelName', 'targetQuantity', 'completedQuantity', 'dueDate'],
+  workers: ['name', 'phone', 'email', 'status', 'notes', 'machineNumber', 'shift', 'clientMutationId'],
+  tasks: ['title', 'description', 'status', 'priority', 'assignedWorkerId', 'assignedWorkerName', 'machineNumber', 'shift', 'modelId', 'modelName', 'modelCategory', 'targetQuantity', 'completedQuantity', 'dueDate', 'clientMutationId'],
 };
 
 function validateResourcePayload(payload, resource, isCreate) {
@@ -281,21 +341,47 @@ function validateResourcePayload(payload, resource, isCreate) {
       if (typeof payload.assignedWorkerId !== 'string' || !payload.assignedWorkerId.trim()) {
         throw createHttpError('العامل المسؤول عن المهمة إلزامي', 400, 'missing_worker');
       }
+      if (typeof payload.modelId !== 'string' || !RESOURCE_ID_REGEX.test(payload.modelId)) {
+        throw createHttpError('اختيار مودال موجود إلزامي قبل إصدار أمر الإنتاج', 400, 'missing_model');
+      }
       if (!Number.isSafeInteger(payload.targetQuantity) || payload.targetQuantity < 1) {
         throw createHttpError('الكمية المطلوبة يجب أن تكون عدداً صحيحاً موجباً', 400, 'invalid_target_quantity');
       }
     }
+  }
+  if (payload.clientMutationId !== undefined && (typeof payload.clientMutationId !== 'string' || !/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(payload.clientMutationId))) {
+    throw createHttpError('معرّف العملية غير صالح', 400, 'invalid_mutation_id');
   }
   for (const [key, value] of Object.entries(payload)) {
     if (!['string', 'number', 'boolean'].includes(typeof value) || (typeof value === 'string' && value.length > 2000)) {
       throw createHttpError(`قيمة الحقل ${key} غير صالحة`, 400, 'invalid_field');
     }
   }
+  if (resource === 'workers') {
+    if (payload.name !== undefined && (typeof payload.name !== 'string' || !payload.name.trim())) {
+      throw createHttpError('اسم العامل لا يمكن أن يكون فارغاً', 400, 'invalid_worker_name');
+    }
+    if (payload.status !== undefined && !['active', 'inactive'].includes(payload.status)) {
+      throw createHttpError('حالة العامل يجب أن تكون active أو inactive فقط', 400, 'invalid_worker_status');
+    }
+    if (payload.phone !== undefined && typeof payload.phone !== 'string') {
+      throw createHttpError('رقم هاتف العامل غير صالح', 400, 'invalid_worker_phone');
+    }
+    if (payload.machineNumber !== undefined && ![1, 2, 3].includes(payload.machineNumber)) {
+      throw createHttpError('رقم المكينة يجب أن يكون 1 أو 2 أو 3', 400, 'invalid_machine_number');
+    }
+    if (payload.shift !== undefined && !['day', 'night'].includes(payload.shift)) {
+      throw createHttpError('الوردية يجب أن تكون نهارية أو ليلية', 400, 'invalid_shift');
+    }
+    if ((payload.machineNumber === undefined) !== (payload.shift === undefined)) {
+      throw createHttpError('يجب تحديد المكينة والوردية معاً', 400, 'incomplete_machine_assignment');
+    }
+  }
 }
 
-async function parseJsonBody(request) {
+async function parseJsonBody(request, maxBytes = 64 * 1024) {
   let payload;
-  try { payload = JSON.parse(await readStreamWithLimit(request.body, 64 * 1024)); }
+  try { payload = JSON.parse(await readStreamWithLimit(request.body, maxBytes)); }
   catch (err) {
     if (err?.code === 'payload_too_large') throw err;
     throw createHttpError('محتوى الطلب ليس بتنسيق JSON صالح', 400, 'invalid_json');
@@ -303,19 +389,63 @@ async function parseJsonBody(request) {
   return payload;
 }
 
-async function handleListResource(request, resource, projectId, accessToken, corsHeaders) {
+async function handleListResource(request, resource, projectId, accessToken, corsHeaders, callerRole = 'super_admin') {
   const url = new URL(request.url);
   const requested = Number(url.searchParams.get('pageSize') || '50');
   const pageSize = Number.isInteger(requested) ? Math.min(Math.max(requested, 1), 100) : 50;
-  const result = await listFirestoreDocs(projectId, accessToken, resource, pageSize);
+  const result = await listAllFirestoreDocs(projectId, accessToken, resource, 100, 500);
   const records = result.documents.map((doc) => sanitizeResourceOutput(convertFromFirestoreFields(doc.fields || {}), resource));
-  return jsonResponse({ success: true, [resource]: records, nextPageToken: result.nextPageToken }, 200, corsHeaders);
+  const visibleRecords = resource === 'workers'
+    ? records.map(worker => sanitizeWorkerOutputForRole(worker, callerRole))
+    : records;
+  return jsonResponse({ success: true, [resource]: visibleRecords, nextPageToken: result.nextPageToken }, 200, corsHeaders);
 }
 
-async function handleCreateResource(request, resource, callerUid, projectId, accessToken, corsHeaders) {
+async function handleCreateResource(request, resource, callerUid, projectId, accessToken, corsHeaders, callerRole = 'super_admin') {
   const payload = await parseJsonBody(request);
-  validateResourcePayload(payload, resource, true);
-  const id = `${resource === 'workers' ? 'wkr' : 'tsk'}_${crypto.randomUUID().replace(/-/g, '')}`;
+  const workerPin = resource === 'workers' ? payload?.pin : undefined;
+  if (resource === 'workers') assertWorkerPinCreationAllowed(callerRole, workerPin);
+  const resourcePayload = resource === 'workers' ? { ...payload } : payload;
+  if (resource === 'workers') delete resourcePayload.pin;
+  if (resource === 'tasks') assertTaskCreationFieldsAllowed(resourcePayload);
+  validateResourcePayload(resourcePayload, resource, true);
+  if (resource === 'workers') assertResponsibleWorkerFieldsAllowed(callerRole, resourcePayload);
+  const clientMutationId = resourcePayload.clientMutationId || null;
+  const id = buildResourceCreationId(resource, clientMutationId);
+  const safePayload = { ...resourcePayload };
+  delete safePayload.clientMutationId;
+  if (clientMutationId) {
+    const existingDoc = await getFirestoreDoc(projectId, accessToken, `${resource}/${id}`);
+    if (existingDoc) {
+      const existing = convertFromFirestoreFields(existingDoc.fields || {});
+      if (!isSameResourceCreation(existing, safePayload, resource, clientMutationId, callerUid)) {
+        throw createHttpError('معرّف العملية مستخدم لإنشاء مورد مختلف أو تابع لمستخدم آخر', 409, 'creation_mutation_conflict');
+      }
+      // If the original response was lost after worker creation, complete the PIN write on retry without storing plaintext.
+      if (resource === 'workers' && callerRole === 'super_admin' && workerPin) {
+        const existingPin = await getFirestoreDoc(projectId, accessToken, `worker_pins/${id}`);
+        if (!existingPin) {
+          const salt = bytesToBase64Url(crypto.getRandomValues(new Uint8Array(16)));
+          const pinHash = await computePinPbkdf2(salt, workerPin);
+          const pinRecord = { workerId: id, pin_hash: pinHash, pin_salt: salt, pin_algo: 'pbkdf2-sha256-v2', pin_iterations: 100000, updatedBy: callerUid, updatedAt: new Date().toISOString() };
+          await commitFirestoreTransaction(projectId, accessToken, null, [{ update: { name: `projects/${projectId}/databases/(default)/documents/worker_pins/${id}`, fields: convertToFirestoreFields(pinRecord) }, currentDocument: { exists: false } }]);
+        }
+      }
+      const existingResponse = resource === 'workers' ? sanitizeWorkerOutputForRole(existing, callerRole) : sanitizeResourceOutput(existing, resource);
+      return jsonResponse({ success: true, [resource === 'workers' ? 'worker' : 'task']: existingResponse, duplicate: true }, 200, corsHeaders);
+    }
+  }
+  if (resource === 'workers') {
+    const existingWorkers = await listAllFirestoreDocs(projectId, accessToken, 'workers', 100, 500);
+    const duplicateName = existingWorkers.documents.map(doc => convertFromFirestoreFields(doc.fields || {})).some(worker => worker.status === 'active' && String(worker.name || '').trim().toLocaleLowerCase() === payload.name.trim().toLocaleLowerCase());
+    if (duplicateName) throw createHttpError('اسم مشرف العمال مستخدم بالفعل؛ اختر اسماً مميزاً لتسجيل الدخول به', 409, 'worker_name_taken');
+    if (![1, 2, 3].includes(payload.machineNumber) || !['day', 'night'].includes(payload.shift)) throw createHttpError('يجب تعيين كل مشرف عمال إلى مكينة ووردية محددتين', 400, 'worker_assignment_required');
+    if (payload.status !== 'inactive') {
+      const occupied = existingWorkers.documents.map(doc => convertFromFirestoreFields(doc.fields || {}))
+        .some(worker => worker.status === 'active' && worker.machineNumber === payload.machineNumber && worker.shift === payload.shift);
+      if (occupied) throw createHttpError('هذه المكينة والوردية مرتبطتان بالفعل بمشرف عمال نشط', 409, 'machine_shift_already_assigned');
+    }
+  }
   const now = new Date().toISOString();
   const defaults = resource === 'workers' ? { status: 'active' } : { status: 'open', completedQuantity: 0 };
   let taskDetails = {};
@@ -324,24 +454,142 @@ async function handleCreateResource(request, resource, callerUid, projectId, acc
     if (!assignedWorkerDoc) throw createHttpError('العامل المحدد غير موجود', 404, 'worker_not_found');
     const assignedWorker = convertFromFirestoreFields(assignedWorkerDoc.fields || {});
     if (assignedWorker.status !== 'active') throw createHttpError('لا يمكن إسناد مهمة إلى عامل غير نشط', 409, 'worker_inactive');
-    taskDetails = { assignedWorkerName: assignedWorker.name };
+    const modelDoc = await getFirestoreDoc(projectId, accessToken, `models/${payload.modelId}`);
+    if (!modelDoc) throw createHttpError('المودال المحدد غير موجود في الكتالوج', 404, 'model_not_found');
+    const model = convertFromFirestoreFields(modelDoc.fields || {});
+    if (![1, 2, 3].includes(assignedWorker.machineNumber) || !['day', 'night'].includes(assignedWorker.shift)) throw createHttpError('حساب مشرف العمال غير مربوط بمكينة ووردية', 409, 'worker_machine_assignment_missing');
+    taskDetails = { assignedWorkerName: assignedWorker.name, machineNumber: assignedWorker.machineNumber, shift: assignedWorker.shift, modelId: payload.modelId, modelName: model.name, modelCategory: model.category };
   }
-  const record = { id, ...defaults, ...taskDetails, ...payload, createdBy: callerUid, createdAt: now, updatedAt: now };
+  const record = { id, ...defaults, ...safePayload, ...taskDetails, createdBy: callerUid, createdAt: now, updatedAt: now, ...(clientMutationId ? { creationMutationId: clientMutationId, creationFingerprint: resourceCreationFingerprint(safePayload, resource) } : {}) };
   const writes = [{ update: { name: `projects/${projectId}/databases/(default)/documents/${resource}/${id}`, fields: convertToFirestoreFields(record) }, currentDocument: { exists: false } }];
-  await commitFirestoreTransaction(projectId, accessToken, null, writes);
-  return jsonResponse({ success: true, [resource === 'workers' ? 'worker' : 'task']: record }, 201, corsHeaders);
+  if (resource === 'workers' && record.status === 'active') {
+    const slotPath = workerMachineSlotPath(record.machineNumber, record.shift);
+    const slotDoc = await getFirestoreDoc(projectId, accessToken, slotPath);
+    writes.push(buildWorkerMachineReservationWrite(projectId, id, record.machineNumber, record.shift, slotDoc, true));
+  }
+  if (resource === 'workers' && callerRole === 'super_admin' && workerPin) {
+    const salt = bytesToBase64Url(crypto.getRandomValues(new Uint8Array(16)));
+    const pinHash = await computePinPbkdf2(salt, workerPin);
+    const pinRecord = { workerId: id, pin_hash: pinHash, pin_salt: salt, pin_algo: 'pbkdf2-sha256-v2', pin_iterations: 100000, updatedBy: callerUid, updatedAt: now };
+    writes.push({
+      update: { name: `projects/${projectId}/databases/(default)/documents/worker_pins/${id}`, fields: convertToFirestoreFields(pinRecord) },
+      currentDocument: { exists: false }
+    });
+  }
+  try {
+    await commitFirestoreTransaction(projectId, accessToken, null, writes);
+  } catch (err) {
+    if (clientMutationId) {
+      const racedDoc = await getFirestoreDoc(projectId, accessToken, `${resource}/${id}`);
+      if (racedDoc) {
+        const raced = convertFromFirestoreFields(racedDoc.fields || {});
+        if (isSameResourceCreation(raced, safePayload, resource, clientMutationId, callerUid)) {
+          const racedResponse = resource === 'workers' ? sanitizeWorkerOutputForRole(raced, callerRole) : sanitizeResourceOutput(raced, resource);
+          return jsonResponse({ success: true, [resource === 'workers' ? 'worker' : 'task']: racedResponse, duplicate: true }, 200, corsHeaders);
+        }
+      }
+    }
+    throw err;
+  }
+  const responseRecord = resource === 'workers' ? sanitizeWorkerOutputForRole(record, callerRole) : record;
+  return jsonResponse({ success: true, [resource === 'workers' ? 'worker' : 'task']: responseRecord }, 201, corsHeaders);
 }
 
-async function handleUpdateResource(request, resource, id, callerUid, projectId, accessToken, corsHeaders) {
+async function handleUpdateResource(request, resource, id, callerUid, projectId, accessToken, corsHeaders, callerRole = null) {
   const payload = await parseJsonBody(request);
+  if (Object.prototype.hasOwnProperty.call(payload || {}, 'clientMutationId')) throw createHttpError('معرّف العملية مخصص للإنشاء ولا يمكن تعديله', 400, 'invalid_mutation_id');
   validateResourcePayload(payload, resource, false);
+  if (resource === 'workers') assertResponsibleWorkerFieldsAllowed(callerRole, payload);
   const currentDoc = await getFirestoreDoc(projectId, accessToken, `${resource}/${id}`);
   if (!currentDoc) throw createHttpError('المورد المطلوب غير موجود', 404, 'resource_not_found');
   const current = convertFromFirestoreFields(currentDoc.fields || {});
-  const record = { ...current, ...payload, updatedBy: callerUid, updatedAt: new Date().toISOString() };
+  const changes = { ...payload };
+
+  if (resource === 'workers' && changes.name !== undefined && (changes.status ?? current.status) === 'active') {
+    const existingWorkers = await listAllFirestoreDocs(projectId, accessToken, 'workers', 100, 500);
+    const duplicateName = existingWorkers.documents.map(doc => convertFromFirestoreFields(doc.fields || {})).some(worker => worker.id !== id && worker.status === 'active' && String(worker.name || '').trim().toLocaleLowerCase() === changes.name.trim().toLocaleLowerCase());
+    if (duplicateName) throw createHttpError('اسم مشرف العمال مستخدم بالفعل؛ اختر اسماً مميزاً لتسجيل الدخول به', 409, 'worker_name_taken');
+  }
+  if (resource === 'workers' && (changes.machineNumber !== undefined || changes.shift !== undefined || changes.status === 'active')) {
+    const targetMachine = changes.machineNumber ?? current.machineNumber;
+    const targetShift = changes.shift ?? current.shift;
+    if (![1, 2, 3].includes(targetMachine) || !['day', 'night'].includes(targetShift)) throw createHttpError('يجب تعيين المكينة والوردية معاً', 400, 'worker_assignment_required');
+  }
+
+  if (resource === 'tasks') {
+    assertTaskUpdateStatusAllowed(current.status, changes.status);
+    if (Object.prototype.hasOwnProperty.call(changes, 'completedQuantity')) {
+      throw createHttpError('لا يمكن تعديل الكمية المنجزة مباشرة؛ تُسجّل عبر سجل الإنجاز فقط', 400, 'completed_quantity_read_only');
+    }
+    if (changes.targetQuantity !== undefined &&
+      (!Number.isSafeInteger(changes.targetQuantity) || changes.targetQuantity < Math.max(1, Number(current.completedQuantity || 0)))) {
+      throw createHttpError('الكمية المطلوبة لا يمكن أن تقل عن الكمية المنجزة بالفعل', 400, 'invalid_target_quantity');
+    }
+    // These display fields are always resolved by the server, never trusted from the browser.
+    delete changes.modelName;
+    delete changes.modelCategory;
+    delete changes.assignedWorkerName;
+
+    if (changes.assignedWorkerId !== undefined) {
+      if (typeof changes.assignedWorkerId !== 'string' || !RESOURCE_ID_REGEX.test(changes.assignedWorkerId)) {
+        throw createHttpError('معرّف العامل غير صالح', 400, 'invalid_worker_id');
+      }
+      const assignedWorkerDoc = await getFirestoreDoc(projectId, accessToken, `workers/${changes.assignedWorkerId}`);
+      if (!assignedWorkerDoc) throw createHttpError('العامل المحدد غير موجود', 404, 'worker_not_found');
+      const assignedWorker = convertFromFirestoreFields(assignedWorkerDoc.fields || {});
+      if (assignedWorker.status !== 'active') throw createHttpError('لا يمكن إسناد المهمة إلى عامل غير نشط', 409, 'worker_inactive');
+      if (![1, 2, 3].includes(assignedWorker.machineNumber) || !['day', 'night'].includes(assignedWorker.shift)) throw createHttpError('حساب مشرف العمال غير مربوط بمكينة ووردية', 409, 'worker_machine_assignment_missing');
+      changes.assignedWorkerName = assignedWorker.name;
+      changes.machineNumber = assignedWorker.machineNumber;
+      changes.shift = assignedWorker.shift;
+    }
+    if (changes.assignedWorkerId === undefined && (changes.machineNumber !== undefined || changes.shift !== undefined)) {
+      throw createHttpError('المكينة والوردية تؤخذان تلقائياً من حساب مشرف العمال', 400, 'machine_assignment_read_only');
+    }
+    if (changes.modelId !== undefined) {
+      if (typeof changes.modelId !== 'string' || !RESOURCE_ID_REGEX.test(changes.modelId)) {
+        throw createHttpError('معرّف المودال غير صالح', 400, 'invalid_model_id');
+      }
+      const modelDoc = await getFirestoreDoc(projectId, accessToken, `models/${changes.modelId}`);
+      if (!modelDoc) throw createHttpError('المودال المحدد غير موجود في الكتالوج', 404, 'model_not_found');
+      const model = convertFromFirestoreFields(modelDoc.fields || {});
+      changes.modelName = model.name;
+      changes.modelCategory = model.category;
+      changes.title = `إنتاج مودال ${model.name}`;
+    }
+  }
+
+  const record = { ...current, ...changes, updatedBy: callerUid, updatedAt: new Date().toISOString() };
   const write = { update: { name: `projects/${projectId}/databases/(default)/documents/${resource}/${id}`, fields: convertToFirestoreFields(record) }, currentDocument: { updateTime: currentDoc.updateTime } };
-  await commitFirestoreTransaction(projectId, accessToken, null, [write]);
-  return jsonResponse({ success: true, [resource === 'workers' ? 'worker' : 'task']: sanitizeResourceOutput(record, resource) }, 200, corsHeaders);
+  const writes = [write];
+  if (resource === 'workers') {
+    const willBeActive = record.status === 'active';
+    const oldAssignmentValid = [1, 2, 3].includes(current.machineNumber) && ['day', 'night'].includes(current.shift);
+    const newAssignmentValid = [1, 2, 3].includes(record.machineNumber) && ['day', 'night'].includes(record.shift);
+    if (willBeActive && !newAssignmentValid) throw createHttpError('يجب تعيين المكينة والوردية قبل تفعيل الحساب', 400, 'worker_assignment_required');
+    if (willBeActive) {
+      const targetPath = workerMachineSlotPath(record.machineNumber, record.shift);
+      const targetSlot = await getFirestoreDoc(projectId, accessToken, targetPath);
+      if (!targetSlot || convertFromFirestoreFields(targetSlot.fields || {}).status !== 'active') {
+        const allWorkers = await listAllFirestoreDocs(projectId, accessToken, 'workers', 100, 500);
+        const occupiedLegacy = allWorkers.documents.map(doc => convertFromFirestoreFields(doc.fields || {}))
+          .some(worker => worker.id !== id && worker.status === 'active' && worker.machineNumber === record.machineNumber && worker.shift === record.shift);
+        if (occupiedLegacy) throw createHttpError('هذه المكينة والوردية مرتبطتان بالفعل بمشرف عمال نشط', 409, 'machine_shift_already_assigned');
+      }
+      writes.push(buildWorkerMachineReservationWrite(projectId, id, record.machineNumber, record.shift, targetSlot, true));
+    }
+    const assignmentChanged = oldAssignmentValid &&
+      (current.machineNumber !== record.machineNumber || current.shift !== record.shift);
+    if ((!willBeActive || assignmentChanged) && oldAssignmentValid) {
+      const oldPath = workerMachineSlotPath(current.machineNumber, current.shift);
+      const oldSlot = await getFirestoreDoc(projectId, accessToken, oldPath);
+      const release = buildWorkerMachineReservationWrite(projectId, id, current.machineNumber, current.shift, oldSlot, false);
+      if (release) writes.push(release);
+    }
+  }
+  await commitFirestoreTransaction(projectId, accessToken, null, writes);
+  const responseRecord = resource === 'workers' ? sanitizeWorkerOutputForRole(record, callerRole) : sanitizeResourceOutput(record, resource);
+  return jsonResponse({ success: true, [resource === 'workers' ? 'worker' : 'task']: responseRecord }, 200, corsHeaders);
 }
 
 async function handleUpdateTaskCollection(request, callerUid, projectId, accessToken, corsHeaders) {
@@ -354,20 +602,423 @@ async function handleUpdateTaskCollection(request, callerUid, projectId, accessT
   return handleUpdateResource(syntheticRequest, 'tasks', id, callerUid, projectId, accessToken, corsHeaders);
 }
 
+/** @param {string} role @param {string} method @param {string | null} [action=null] */
+export function buildResourceCreationId(resource, clientMutationId) {
+  if (!['workers', 'tasks'].includes(resource)) throw createHttpError('نوع المورد غير صالح', 400, 'invalid_resource');
+  const prefix = resource === 'workers' ? 'wkr' : 'tsk';
+  const mutation = clientMutationId || crypto.randomUUID();
+  if (typeof mutation !== 'string' || !/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(mutation)) {
+    throw createHttpError('معرّف العملية غير صالح', 400, 'invalid_mutation_id');
+  }
+  return `${prefix}_${mutation.replace(/-/g, '')}`;
+}
+
+export function resourceCreationFingerprint(payload, resource) {
+  const fields = resource === 'workers'
+    ? ['name', 'phone', 'machineNumber', 'shift']
+    : ['title', 'description', 'assignedWorkerId', 'modelId', 'targetQuantity', 'dueDate'];
+  const snapshot = {};
+  for (const key of fields) {
+    if (payload[key] !== undefined) snapshot[key] = payload[key];
+  }
+  return JSON.stringify(snapshot);
+}
+
+export function isSameResourceCreation(existing, payload, resource, clientMutationId, callerUid) {
+  return Boolean(existing &&
+    existing.creationMutationId === clientMutationId &&
+    existing.createdBy === callerUid &&
+    existing.creationFingerprint === resourceCreationFingerprint(payload, resource));
+}
+
+export function assertTaskUpdateStatusAllowed(currentStatus, requestedStatus) {
+  if (['completed', 'cancelled'].includes(currentStatus)) {
+    throw createHttpError('المهمة المكتملة أو الملغاة مغلقة ولا تقبل تعديلات أخرى', 409, 'task_not_changeable');
+  }
+  if (requestedStatus !== undefined && !['open', 'in_progress', 'pending', 'cancelled'].includes(requestedStatus)) {
+    throw createHttpError('حالة المهمة غير صالحة؛ الإكمال لا يتم إلا عبر سجل الإنجاز', 400, 'invalid_task_status');
+  }
+  return true;
+}
+
+export function assertTaskCreationFieldsAllowed(payload) {
+  if (Object.prototype.hasOwnProperty.call(payload || {}, 'completedQuantity')) {
+    throw createHttpError('الكمية المنجزة تبدأ من صفر وتُسجّل عبر سجل الإنجاز فقط', 400, 'completed_quantity_read_only');
+  }
+  if (Object.prototype.hasOwnProperty.call(payload || {}, 'status')) {
+    throw createHttpError('تبدأ المهمة بالحالة الجديدة؛ لا يمكن فرض حالتها عند الإنشاء', 400, 'invalid_initial_task_status');
+  }
+  return true;
+}
+
+export function assertResponsibleWorkerFieldsAllowed(role, payload) {
+  if (role !== 'responsible') return true;
+  const allowed = ['name', 'machineNumber', 'shift', 'status', 'clientMutationId'];
+  const forbidden = Object.keys(payload || {}).filter(key => !allowed.includes(key));
+  if (forbidden.length) {
+    throw createHttpError('المسؤول لا يستطيع إدخال أو تعديل بيانات العامل خارج الاسم والمكينة والوردية والحالة', 403, 'responsible_worker_field_forbidden');
+  }
+  return true;
+}
+
+/**
+ * @param {string} role
+ * @param {unknown} pin
+ */
+export function assertWorkerPinCreationAllowed(role, pin) {
+  if (pin === undefined || pin === null || pin === '') return true;
+  if (role !== 'super_admin') {
+    throw createHttpError('تعيين PIN لمشرف العمال من اختصاص المشرف العام فقط', 403, 'worker_pin_super_admin_only');
+  }
+  if (typeof pin !== 'string' || !/^\d{6}$/.test(pin)) {
+    throw createHttpError('PIN يجب أن يتكون من 6 أرقام بالضبط', 400, 'invalid_pin');
+  }
+  return true;
+}
+
+/**
+ * @param {string} role
+ * @param {string} method
+ * @param {string | null} [action=null]
+ */
+export function assertWorkerManagementPermission(role, method, action = null) {
+  if (role === 'super_admin') return true;
+  if (action === 'pin') {
+    throw createHttpError('تعيين أو تغيير رموز PIN من صلاحيات المشرف العام فقط', 403, 'worker_pin_super_admin_only');
+  }
+  if (role === 'admin' && ['GET', 'POST', 'PUT', 'DELETE'].includes(method)) return true;
+  if (role === 'responsible' && ['GET', 'POST', 'PUT', 'DELETE'].includes(method)) return true;
+  throw createHttpError('لا تملك صلاحية تنفيذ هذه العملية على حسابات مشرفي العمال', 403, 'worker_management_forbidden');
+}
+
+/** @param {string} role */
+export function assertTaskManagementPermission(role) {
+  if (role === 'super_admin' || role === 'admin') return true;
+  throw createHttpError('إدارة مهام الإنتاج من صلاحيات المدير العام والمشرف العام فقط', 403, 'task_management_forbidden');
+}
+
+export function assertSuperAdminManagementAccountsPermission(role) {
+  if (role === 'super_admin') return true;
+  throw createHttpError('إدارة حسابات المديرين والمسؤولين من صلاحيات المشرف العام فقط', 403, 'super_admin_only_management_accounts');
+}
+
+/** @param {{role:string,status?:string,shift?:string}} current
+ * @param {{status?:string,shift?:string}} changes
+ * @param {Array<{uid?:string,id?:string,role?:string,status?:string,shift?:string}>} accounts
+ * @param {string} targetUid
+ * @param {string} callerUid
+ */
+export function assertManagementAccountUpdateAllowed(current, changes, accounts, targetUid, callerUid) {
+  if (targetUid === callerUid && changes.status === 'inactive') {
+    throw createHttpError('لا يمكن للمشرف العام تجميد حسابه بنفسه', 403, 'cannot_freeze_self');
+  }
+  const nextStatus = changes.status ?? current.status;
+  const nextShift = changes.shift ?? current.shift;
+  if (current.role === 'responsible' && nextStatus === 'active' &&
+      accounts.some(user => (user.uid || user.id) !== targetUid &&
+        user.role === 'responsible' && user.status === 'active' && user.shift === nextShift)) {
+    throw createHttpError('توجد بالفعل حساب مسؤول نشط لهذه الوردية', 409, 'responsible_shift_taken');
+  }
+  return true;
+}
+
+/** Build an optimistic-concurrency reservation write for one responsible shift. */
+export function buildResponsibleShiftReservationWrite(projectId, uid, shift, slotDoc, active) {
+  if (!['day', 'night'].includes(shift)) throw createHttpError('الوردية غير صالحة', 400, 'invalid_responsible_shift');
+  const existing = slotDoc ? convertFromFirestoreFields(slotDoc.fields || {}) : null;
+  if (!active) {
+    if (!existing || existing.uid !== uid || existing.status !== 'active') return null;
+  } else if (existing && existing.status === 'active' && existing.uid !== uid) {
+    throw createHttpError('هذه الوردية محجوزة لمسؤول آخر', 409, 'responsible_shift_taken');
+  }
+  const record = { uid, shift, status: active ? 'active' : 'inactive', updatedAt: new Date().toISOString() };
+  const write = {
+    update: {
+      name: `projects/${projectId}/databases/(default)/documents/management_responsible_slots/${shift}`,
+      fields: convertToFirestoreFields(record)
+    }
+  };
+  write.currentDocument = slotDoc?.updateTime ? { updateTime: slotDoc.updateTime } : { exists: false };
+  return write;
+}
+
+export function workerMachineSlotPath(machineNumber, shift) {
+  if (![1, 2, 3].includes(machineNumber) || !['day', 'night'].includes(shift)) {
+    throw createHttpError('تعيين المكينة أو الوردية غير صالح', 400, 'worker_assignment_required');
+  }
+  return `worker_machine_slots/m${machineNumber}_${shift}`;
+}
+
+export function buildWorkerMachineReservationWrite(projectId, workerId, machineNumber, shift, slotDoc, active) {
+  const path = workerMachineSlotPath(machineNumber, shift);
+  const existing = slotDoc ? convertFromFirestoreFields(slotDoc.fields || {}) : null;
+  if (!active && (!existing || existing.workerId !== workerId || existing.status !== 'active')) return null;
+  if (active && existing && existing.status === 'active' && existing.workerId !== workerId) {
+    throw createHttpError('هذه المكينة والوردية محجوزتان لمشرف عمال آخر', 409, 'machine_shift_already_assigned');
+  }
+  const record = { workerId, machineNumber, shift, status: active ? 'active' : 'inactive', updatedAt: new Date().toISOString() };
+  const write = {
+    update: {
+      name: `projects/${projectId}/databases/(default)/documents/${path}`,
+      fields: convertToFirestoreFields(record)
+    }
+  };
+  write.currentDocument = slotDoc?.updateTime ? { updateTime: slotDoc.updateTime } : { exists: false };
+  return write;
+}
+
+export function buildWorkerFreezeUpdate(current, timestamp) {
+  return { ...current, status: 'inactive', frozenAt: timestamp, updatedAt: timestamp };
+}
+
 async function handleDeleteResource(id, resource, projectId, accessToken, corsHeaders) {
   const current = await getFirestoreDoc(projectId, accessToken, `${resource}/${id}`);
   if (!current) throw createHttpError('المورد المطلوب غير موجود', 404, 'resource_not_found');
-  await commitFirestoreTransaction(projectId, accessToken, null, [{ delete: `projects/${projectId}/databases/(default)/documents/${resource}/${id}`, currentDocument: { updateTime: current.updateTime } }]);
-  return jsonResponse({ success: true, id }, 200, corsHeaders);
+  // Worker records are never permanently deleted: the legacy DELETE route freezes the account.
+  if (resource === 'workers') {
+    const existing = convertFromFirestoreFields(current.fields || {});
+    const timestamp = new Date().toISOString();
+    const frozen = buildWorkerFreezeUpdate(existing, timestamp);
+    const writes = [{
+      update: {
+        name: `projects/${projectId}/databases/(default)/documents/workers/${id}`,
+        fields: convertToFirestoreFields(frozen)
+      },
+      currentDocument: { updateTime: current.updateTime }
+    }];
+    if ([1, 2, 3].includes(existing.machineNumber) && ['day', 'night'].includes(existing.shift)) {
+      const slot = await getFirestoreDoc(projectId, accessToken, workerMachineSlotPath(existing.machineNumber, existing.shift));
+      const release = buildWorkerMachineReservationWrite(projectId, id, existing.machineNumber, existing.shift, slot, false);
+      if (release) writes.push(release);
+    }
+    await commitFirestoreTransaction(projectId, accessToken, null, writes);
+    return jsonResponse({ success: true, id, status: 'inactive', frozen: true }, 200, corsHeaders);
+  }
+  throw createHttpError('الحذف الدائم غير مسموح لهذا المورد', 405, 'permanent_delete_forbidden');
+}
+
+
+
+async function handleListManagementAccounts(projectId, accessToken, corsHeaders) {
+  const result = await listAllFirestoreDocs(projectId, accessToken, 'users', 100, 500);
+  const accounts = result.documents.map(doc => ({ ...convertFromFirestoreFields(doc.fields || {}), uid: doc.name?.split('/').pop() }))
+    .filter(user => ['admin', 'responsible'].includes(user.role))
+    .map(user => ({ uid: user.uid, displayName: user.displayName || user.name || '', role: user.role, status: user.status, shift: user.shift || null, createdAt: user.createdAt || null }));
+  return jsonResponse({ success: true, data: accounts }, 200, corsHeaders);
+}
+
+async function handleCreateManagementAccount(request, callerUid, projectId, accessToken, corsHeaders) {
+  const payload = await parseJsonBody(request);
+  const name = typeof payload?.name === 'string' ? payload.name.trim() : '';
+  const role = payload?.role;
+  const code = typeof payload?.code === 'string' ? payload.code : '';
+  const shift = payload?.shift;
+  if (!name || name.length > 80 || !['admin', 'responsible'].includes(role) || !/^\d{6}$/.test(code)) {
+    throw createHttpError('أدخل الاسم ونوع الحساب والكود السري المكوّن من 6 أرقام', 400, 'invalid_management_account');
+  }
+  if (role === 'responsible' && !['day', 'night'].includes(shift)) throw createHttpError('يجب تحديد وردية المسؤول: نهار أو ليل', 400, 'responsible_shift_required');
+  if (role === 'admin' && shift !== undefined) throw createHttpError('حساب المدير العام لا يحتاج إلى وردية', 400, 'unexpected_shift');
+  const result = await listAllFirestoreDocs(projectId, accessToken, 'users', 100, 500);
+  const accounts = result.documents.map(doc => convertFromFirestoreFields(doc.fields || {})).filter(user => user.role === role);
+  if (accounts.some(user => String(user.displayName || user.name || '').trim().toLocaleLowerCase() === name.toLocaleLowerCase())) {
+    throw createHttpError('يوجد حساب من النوع نفسه بهذا الاسم بالفعل', 409, 'management_name_taken');
+  }
+  if (role === 'responsible') {
+    const activeAccounts = accounts.filter(user => user.status === 'active');
+    if (activeAccounts.length >= 2) throw createHttpError('يوجد حسابا مسؤول نشطان بالفعل؛ واحد للنهار وآخر لليل', 409, 'responsible_accounts_limit');
+    if (activeAccounts.some(user => user.shift === shift)) throw createHttpError('يوجد بالفعل حساب مسؤول مخصص لهذه الوردية', 409, 'responsible_shift_taken');
+  }
+  const uid = `mgr_${crypto.randomUUID().replace(/-/g, '')}`;
+  const reservationWrites = [];
+  if (role === 'responsible') {
+    const slotDoc = await getFirestoreDoc(projectId, accessToken, `management_responsible_slots/${shift}`);
+    reservationWrites.push(buildResponsibleShiftReservationWrite(projectId, uid, shift, slotDoc, true));
+  }
+  const now = new Date().toISOString();
+  const user = { uid, displayName: name, name, email: '', role, status: 'active', ...(role === 'responsible' ? { shift } : {}), createdBy: callerUid, createdAt: now, updatedAt: now };
+  const salt = bytesToBase64Url(crypto.getRandomValues(new Uint8Array(16)));
+  const pinHash = await computePinPbkdf2(salt, code);
+  const codeRecord = { uid, pin_hash: pinHash, pin_salt: salt, pin_algo: 'pbkdf2-sha256-v2', pin_iterations: 100000, updatedBy: callerUid, updatedAt: now };
+  await commitFirestoreTransaction(projectId, accessToken, null, [
+    { update: { name: `projects/${projectId}/databases/(default)/documents/users/${uid}`, fields: convertToFirestoreFields(user) }, currentDocument: { exists: false } },
+    { update: { name: `projects/${projectId}/databases/(default)/documents/management_codes/${uid}`, fields: convertToFirestoreFields(codeRecord) }, currentDocument: { exists: false } },
+    ...reservationWrites
+  ]);
+  return jsonResponse({ success: true, data: { uid, displayName: name, role, status: 'active', shift: shift || null } }, 201, corsHeaders);
+}
+
+async function handleSetManagementCode(request, uid, callerUid, projectId, accessToken, corsHeaders) {
+  const payload = await parseJsonBody(request);
+  if (!payload || typeof payload.code !== 'string' || !/^\d{6}$/.test(payload.code)) throw createHttpError('الكود السري يجب أن يتكون من 6 أرقام', 400, 'invalid_management_code');
+  const userDoc = await getFirestoreDoc(projectId, accessToken, `users/${uid}`);
+  if (!userDoc) throw createHttpError('الحساب غير موجود', 404, 'management_account_not_found');
+  const user = convertFromFirestoreFields(userDoc.fields || {});
+  if (!['admin', 'responsible'].includes(user.role)) throw createHttpError('نوع الحساب غير مدعوم', 400, 'invalid_management_role');
+  const salt = bytesToBase64Url(crypto.getRandomValues(new Uint8Array(16)));
+  const pinHash = await computePinPbkdf2(salt, payload.code);
+  const path = `management_codes/${uid}`;
+  const old = await getFirestoreDoc(projectId, accessToken, path);
+  const record = { uid, pin_hash: pinHash, pin_salt: salt, pin_algo: 'pbkdf2-sha256-v2', pin_iterations: 100000, updatedBy: callerUid, updatedAt: new Date().toISOString() };
+  const write = { update: { name: `projects/${projectId}/databases/(default)/documents/${path}`, fields: convertToFirestoreFields(record) } };
+  write.currentDocument = old?.updateTime ? { updateTime: old.updateTime } : { exists: false };
+  await commitFirestoreTransaction(projectId, accessToken, null, [write]);
+  return jsonResponse({ success: true, uid, message: 'تم تحديث الكود السري.' }, 200, corsHeaders);
+}
+
+async function handleUpdateManagementAccount(request, uid, callerUid, projectId, accessToken, corsHeaders) {
+  const payload = await parseJsonBody(request);
+  const allowed = ['name', 'shift', 'status'];
+  if (!payload || typeof payload !== 'object' || Object.keys(payload).some(key => !allowed.includes(key))) throw createHttpError('حقول تعديل الحساب غير صالحة', 400, 'invalid_management_update');
+  const doc = await getFirestoreDoc(projectId, accessToken, `users/${uid}`);
+  if (!doc) throw createHttpError('الحساب غير موجود', 404, 'management_account_not_found');
+  const current = convertFromFirestoreFields(doc.fields || {});
+  if (!['admin', 'responsible'].includes(current.role)) throw createHttpError('نوع الحساب غير مدعوم', 400, 'invalid_management_role');
+  const changes = {};
+  if (payload.name !== undefined) {
+    if (typeof payload.name !== 'string' || !payload.name.trim() || payload.name.trim().length > 80) throw createHttpError('اسم الحساب غير صالح', 400, 'invalid_management_name');
+    const all = await listAllFirestoreDocs(projectId, accessToken, 'users', 100, 500);
+    const duplicate = all.documents.map(d => ({ ...convertFromFirestoreFields(d.fields || {}), uid: d.name?.split('/').pop() }))
+      .some(user => user.uid !== uid && user.role === current.role && String(user.displayName || user.name || '').trim().toLocaleLowerCase() === payload.name.trim().toLocaleLowerCase());
+    if (duplicate) throw createHttpError('الاسم مستخدم في حساب آخر من النوع نفسه', 409, 'management_name_taken');
+    changes.displayName = payload.name.trim(); changes.name = payload.name.trim();
+  }
+  if (payload.shift !== undefined) {
+    if (current.role !== 'responsible' || !['day', 'night'].includes(payload.shift)) throw createHttpError('الوردية غير صالحة لهذا الحساب', 400, 'invalid_responsible_shift');
+    const all = await listAllFirestoreDocs(projectId, accessToken, 'users', 100, 500);
+    if (all.documents.map(d => ({ ...convertFromFirestoreFields(d.fields || {}), uid: d.name?.split('/').pop() })).some(user => user.uid !== uid && user.role === 'responsible' && user.status === 'active' && user.shift === payload.shift)) throw createHttpError('هذه الوردية مخصصة لحساب مسؤول آخر', 409, 'responsible_shift_taken');
+    changes.shift = payload.shift;
+  }
+  if (payload.status !== undefined) {
+    if (!['active', 'inactive'].includes(payload.status)) throw createHttpError('حالة الحساب غير صالحة', 400, 'invalid_management_status');
+    changes.status = payload.status;
+  }
+  const allAccounts = (await listAllFirestoreDocs(projectId, accessToken, 'users', 100, 500)).documents
+    .map(item => ({ ...convertFromFirestoreFields(item.fields || {}), uid: item.name?.split('/').pop() }));
+  assertManagementAccountUpdateAllowed(current, changes, allAccounts, uid, callerUid);
+  const record = { ...current, ...changes, updatedBy: callerUid, updatedAt: new Date().toISOString() };
+  const writes = [{ update: { name: `projects/${projectId}/databases/(default)/documents/users/${uid}`, fields: convertToFirestoreFields(record) }, currentDocument: { updateTime: doc.updateTime } }];
+  if (current.role === 'responsible') {
+    const nextShift = record.shift || current.shift;
+    const nextActive = record.status === 'active';
+    const oldSlot = current.shift ? await getFirestoreDoc(projectId, accessToken, `management_responsible_slots/${current.shift}`) : null;
+    if (nextActive) {
+      const nextSlot = nextShift === current.shift ? oldSlot : await getFirestoreDoc(projectId, accessToken, `management_responsible_slots/${nextShift}`);
+      writes.push(buildResponsibleShiftReservationWrite(projectId, uid, nextShift, nextSlot, true));
+    }
+    if (oldSlot && current.shift && (!nextActive || nextShift !== current.shift)) {
+      const release = buildResponsibleShiftReservationWrite(projectId, uid, current.shift, oldSlot, false);
+      if (release) writes.push(release);
+    }
+  }
+  await commitFirestoreTransaction(projectId, accessToken, null, writes);
+  return jsonResponse({ success: true, data: { uid, displayName: record.displayName, role: record.role, status: record.status, shift: record.shift || null } }, 200, corsHeaders);
+}
+
+async function handleFreezeManagementAccount(uid, callerUid, projectId, accessToken, corsHeaders) {
+  const doc = await getFirestoreDoc(projectId, accessToken, `users/${uid}`);
+  if (!doc) throw createHttpError('الحساب غير موجود', 404, 'management_account_not_found');
+  const current = convertFromFirestoreFields(doc.fields || {});
+  if (!['admin', 'responsible'].includes(current.role)) throw createHttpError('لا يمكن تجميد هذا النوع من الحسابات', 403, 'management_account_freeze_forbidden');
+  assertManagementAccountUpdateAllowed(current, { status: 'inactive' }, [], uid, callerUid);
+  const now = new Date().toISOString();
+  const record = { ...current, status: 'inactive', frozenAt: now, updatedAt: now, updatedBy: callerUid };
+  const writes = [{ update: { name: `projects/${projectId}/databases/(default)/documents/users/${uid}`, fields: convertToFirestoreFields(record) }, currentDocument: { updateTime: doc.updateTime } }];
+  if (current.role === 'responsible' && current.shift) {
+    const slotDoc = await getFirestoreDoc(projectId, accessToken, `management_responsible_slots/${current.shift}`);
+    const release = buildResponsibleShiftReservationWrite(projectId, uid, current.shift, slotDoc, false);
+    if (release) writes.push(release);
+  }
+  await commitFirestoreTransaction(projectId, accessToken, null, writes);
+  return jsonResponse({ success: true, data: { uid, status: 'inactive', frozen: true } }, 200, corsHeaders);
+}
+
+export function buildLoginAttemptRecord(identityField, identity, previous = {}, nowMs = Date.now(), succeeded = false) {
+  if (!['uid', 'workerId'].includes(identityField) || typeof identity !== 'string' || !identity) {
+    throw createHttpError('معرّف حساب تسجيل الدخول غير صالح', 400, 'invalid_login_identity');
+  }
+  if (Number(previous.lockedUntil || 0) > nowMs) {
+    throw createHttpError('تم إيقاف محاولة الدخول مؤقتاً. حاول بعد 15 دقيقة.', 429, 'login_locked');
+  }
+  const updatedAt = new Date(nowMs).toISOString();
+  if (succeeded) return { [identityField]: identity, count: 0, lockedUntil: 0, updatedAt };
+  const previousCount = Number(previous.count || 0);
+  const count = Number.isSafeInteger(previousCount) && previousCount > 0 ? previousCount + 1 : 1;
+  const lockedUntil = count >= 5 ? nowMs + 15 * 60 * 1000 : 0;
+  return { [identityField]: identity, count: lockedUntil ? 0 : count, lockedUntil, updatedAt };
+}
+
+async function persistLoginAttempt(projectId, accessToken, collection, id, identityField, identity, succeeded) {
+  const path = `${collection}/${id}`;
+  for (let attempt = 0; attempt < 8; attempt++) {
+    const tx = await beginFirestoreTransaction(projectId, accessToken);
+    let committed = false;
+    try {
+      const doc = await getFirestoreDoc(projectId, accessToken, path, tx.transaction);
+      const previous = doc ? convertFromFirestoreFields(doc.fields || {}) : {};
+      const record = buildLoginAttemptRecord(identityField, identity, previous, Date.now(), succeeded);
+      const write = {
+        update: {
+          name: `projects/${projectId}/databases/(default)/documents/${path}`,
+          fields: convertToFirestoreFields(record)
+        }
+      };
+      if (!doc) write.currentDocument = { exists: false };
+      await commitFirestoreTransaction(projectId, accessToken, tx.transaction, [write]);
+      committed = true;
+      return record;
+    } catch (err) {
+      if (!committed && tx?.transaction) await rollbackFirestoreTransaction(projectId, accessToken, tx.transaction).catch(() => {});
+      if (err?.code === 'conflict' && attempt < 7) continue;
+      throw err;
+    }
+  }
+  throw createHttpError('تعذر تحديث عداد محاولات الدخول بسبب طلبات متزامنة؛ حاول مجدداً', 503, 'login_attempt_contention');
+}
+
+async function handleManagementLogin(request, env, projectId, accessToken, corsHeaders) {
+  const payload = await parseJsonBody(request);
+  const name = typeof payload?.name === 'string' ? payload.name.trim() : '';
+  const code = typeof payload?.code === 'string' ? payload.code : '';
+  const role = payload?.role;
+  if (!name || name.length > 100 || !/^\d{6}$/.test(code) || !['admin', 'responsible'].includes(role)) {
+    throw createHttpError('أدخل الاسم والكود السري الصحيحين واختر نوع الحساب', 400, 'invalid_management_credentials');
+  }
+  const result = await listAllFirestoreDocs(projectId, accessToken, 'users', 100, 500);
+  const matches = result.documents.map(doc => ({ ...convertFromFirestoreFields(doc.fields || {}), uid: doc.name?.split('/').pop() }))
+    .filter(user => user.role === role && user.status === 'active' && String(user.displayName || user.name || '').trim().toLocaleLowerCase() === name.toLocaleLowerCase());
+  if (matches.length !== 1) throw createHttpError('الاسم أو الكود السري غير صحيح', 401, 'invalid_management_credentials');
+  const user = matches[0];
+  const uid = user.uid;
+  if (!uid) throw createHttpError('ملف الحساب غير مكتمل', 403, 'management_account_invalid');
+  const codeDoc = await getFirestoreDoc(projectId, accessToken, `management_codes/${uid}`);
+  if (!codeDoc) throw createHttpError('لم يعيّن المشرف العام كود دخول لهذا الحساب بعد', 403, 'management_code_missing');
+  const codeRecord = convertFromFirestoreFields(codeDoc.fields || {});
+  const attemptsDoc = await getFirestoreDoc(projectId, accessToken, `management_auth_attempts/${uid}`);
+  const attempts = attemptsDoc ? convertFromFirestoreFields(attemptsDoc.fields || {}) : {};
+  if (Number(attempts.lockedUntil || 0) > Date.now()) throw createHttpError('تم إيقاف محاولة الدخول مؤقتاً. حاول بعد 15 دقيقة.', 429, 'management_login_locked');
+  const suppliedHash = await computeStoredPinHash(codeRecord, code, 'رمز حساب المسؤول');
+  if (suppliedHash !== codeRecord.pin_hash) {
+    await persistLoginAttempt(projectId, accessToken, 'management_auth_attempts', uid, 'uid', uid, false);
+    throw createHttpError('الاسم أو الكود السري غير صحيح', 401, 'invalid_management_credentials');
+  }
+  await persistLoginAttempt(projectId, accessToken, 'management_auth_attempts', uid, 'uid', uid, true);
+  const displayName = String(user.displayName || user.name || name);
+  const customToken = await createFirebaseCustomToken(env, uid, displayName, role);
+  return jsonResponse({ success: true, customToken, user: { uid, displayName, role } }, 200, corsHeaders);
 }
 
 async function handleWorkerLogin(request, env, projectId, accessToken, corsHeaders) {
   const payload = await parseJsonBody(request);
-  const workerId = typeof payload?.workerId === 'string' ? payload.workerId.trim() : '';
+  const workerName = typeof payload?.name === 'string' ? payload.name.trim() : '';
   const pin = typeof payload?.pin === 'string' ? payload.pin : '';
-  if (!RESOURCE_ID_REGEX.test(workerId) || !/^\d{6}$/.test(pin)) {
-    throw createHttpError('أدخل رمز العامل وPIN من 6 أرقام', 400, 'invalid_worker_credentials');
+  if (!workerName || workerName.length > 100 || !/^\d{6}$/.test(pin)) {
+    throw createHttpError('أدخل اسم مشرف العمال والكود السري المكوّن من 6 أرقام', 400, 'invalid_worker_credentials');
   }
+  const workerList = await listAllFirestoreDocs(projectId, accessToken, 'workers', 100, 500);
+  const matchingWorkers = workerList.documents.map(doc => ({ doc, worker: convertFromFirestoreFields(doc.fields || {}) }))
+    .filter(item => item.worker.status === 'active' && String(item.worker.name || '').trim().toLocaleLowerCase() === workerName.toLocaleLowerCase());
+  if (matchingWorkers.length !== 1) throw createHttpError('الاسم أو الكود السري غير صحيح، أو أن الاسم غير فريد', 401, 'invalid_worker_credentials');
+  const workerId = matchingWorkers[0].worker.id;
   const workerDoc = await getFirestoreDoc(projectId, accessToken, `workers/${workerId}`);
   const pinDoc = await getFirestoreDoc(projectId, accessToken, `worker_pins/${workerId}`);
   if (!workerDoc || !pinDoc) throw createHttpError('بيانات العامل أو PIN غير صحيحة', 401, 'invalid_worker_credentials');
@@ -375,38 +1026,25 @@ async function handleWorkerLogin(request, env, projectId, accessToken, corsHeade
   const pinRecord = convertFromFirestoreFields(pinDoc.fields || {});
   if (worker.status !== 'active') throw createHttpError('حساب العامل غير نشط', 403, 'worker_inactive');
 
-  const attemptsPath = `worker_auth_attempts/${workerId}`;
-  const attemptsDoc = await getFirestoreDoc(projectId, accessToken, attemptsPath);
+  const attemptsDoc = await getFirestoreDoc(projectId, accessToken, `worker_auth_attempts/${workerId}`);
   const attempts = attemptsDoc ? convertFromFirestoreFields(attemptsDoc.fields || {}) : {};
-  const now = Date.now();
-  if (Number(attempts.lockedUntil || 0) > now) {
+  if (Number(attempts.lockedUntil || 0) > Date.now()) {
     throw createHttpError('تم إيقاف محاولة الدخول مؤقتاً. حاول بعد 15 دقيقة.', 429, 'worker_login_locked');
   }
 
-  const suppliedHash = pinRecord.pin_algo === 'pbkdf2-sha256-v1'
-    ? await computePinPbkdf2(pinRecord.pin_salt, pin)
-    : await computeWebCryptoSha256(`${pinRecord.pin_salt}:${pin}`);
+  const suppliedHash = await computeStoredPinHash(pinRecord, pin, 'رمز مشرف العمال');
   if (suppliedHash !== pinRecord.pin_hash) {
-    const count = Number(attempts.count || 0) + 1;
-    const lockedUntil = count >= 5 ? now + 15 * 60 * 1000 : 0;
-    const attemptRecord = { workerId, count: lockedUntil ? 0 : count, lockedUntil, updatedAt: new Date().toISOString() };
-    const write = { update: { name: `projects/${projectId}/databases/(default)/documents/${attemptsPath}`, fields: convertToFirestoreFields(attemptRecord) } };
-    if (attemptsDoc?.updateTime) write.currentDocument = { updateTime: attemptsDoc.updateTime };
-    else write.currentDocument = { exists: false };
-    await commitFirestoreTransaction(projectId, accessToken, null, [write]);
+    await persistLoginAttempt(projectId, accessToken, 'worker_auth_attempts', workerId, 'workerId', workerId, false);
     throw createHttpError('بيانات العامل أو PIN غير صحيحة', 401, 'invalid_worker_credentials');
   }
 
-  const resetWrite = { update: { name: `projects/${projectId}/databases/(default)/documents/${attemptsPath}`, fields: convertToFirestoreFields({ workerId, count: 0, lockedUntil: 0, updatedAt: new Date().toISOString() }) } };
-  if (attemptsDoc?.updateTime) resetWrite.currentDocument = { updateTime: attemptsDoc.updateTime };
-  else resetWrite.currentDocument = { exists: false };
-  await commitFirestoreTransaction(projectId, accessToken, null, [resetWrite]);
+  await persistLoginAttempt(projectId, accessToken, 'worker_auth_attempts', workerId, 'workerId', workerId, true);
 
   const customToken = await createFirebaseCustomToken(env, workerId, worker.name);
   return jsonResponse({ success: true, customToken, worker: { id: workerId, name: worker.name } }, 200, corsHeaders);
 }
 
-async function createFirebaseCustomToken(env, uid, workerName) {
+async function createFirebaseCustomToken(env, uid, workerName, role = 'worker') {
   const sa = parseServiceAccount(env);
   const nowSec = Math.floor(Date.now() / 1000);
   const header = bytesToBase64Url(new TextEncoder().encode(JSON.stringify({ alg: 'RS256', typ: 'JWT' })));
@@ -414,7 +1052,7 @@ async function createFirebaseCustomToken(env, uid, workerName) {
     iss: sa.client_email, sub: sa.client_email,
     aud: 'https://identitytoolkit.googleapis.com/google.identity.identitytoolkit.v1.IdentityToolkit',
     iat: nowSec, exp: nowSec + 3600, uid,
-    claims: { role: 'worker', workerId: uid, workerName: String(workerName || 'العامل').slice(0, 80) }
+    claims: { role, ...(role === 'worker' ? { workerId: uid } : {}), workerName: String(workerName || 'مستخدم').slice(0, 80) }
   })));
   const signingInput = `${header}.${payload}`;
   const key = await importPkcs8PrivateKey(sa.private_key);
@@ -422,17 +1060,407 @@ async function createFirebaseCustomToken(env, uid, workerName) {
   return `${signingInput}.${bytesToBase64Url(new Uint8Array(signature))}`;
 }
 
+async function readConversation(workerId, projectId, accessToken) {
+  const url = `${FIRESTORE_BASE_URL}/${projectId}/databases/(default)/documents:runQuery`;
+  const response = await fetch(url, {
+    method: 'POST',
+    headers: { Authorization: `Bearer ${accessToken}`, 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      structuredQuery: {
+        from: [{ collectionId: 'messages' }],
+        where: {
+          fieldFilter: {
+            field: { fieldPath: 'workerId' },
+            op: 'EQUAL',
+            value: { stringValue: workerId }
+          }
+        },
+        limit: 1000
+      }
+    })
+  });
+  if (!response.ok) throw createHttpError('تعذر تحميل رسائل المحادثة', 500, 'messages_read_failed');
+  const rows = await response.json();
+  return rows.filter(row => row.document).map(row => {
+    const message = convertFromFirestoreFields(row.document.fields || {});
+    message.id = message.id || String(row.document.name || '').split('/').pop();
+    return message;
+  }).sort((a, b) => String(a.createdAt || '').localeCompare(String(b.createdAt || ''))).slice(-100);
+}
+
+async function saveConversationMessage(workerId, senderUid, senderRole, senderName, text, projectId, accessToken) {
+  const cleanText = typeof text === 'string' ? text.trim() : '';
+  if (!cleanText || cleanText.length > 2000) {
+    throw createHttpError('اكتب رسالة لا تتجاوز 2000 حرف', 400, 'invalid_message');
+  }
+  const workerDoc = await getFirestoreDoc(projectId, accessToken, `workers/${workerId}`);
+  if (!workerDoc || convertFromFirestoreFields(workerDoc.fields || {}).status !== 'active') {
+    throw createHttpError('العامل غير موجود أو حسابه غير نشط', 404, 'worker_not_found');
+  }
+  const id = `msg_${crypto.randomUUID().replace(/-/g, '')}`;
+  const message = {
+    id, workerId, senderUid, senderRole, senderName: String(senderName || 'مستخدم').slice(0, 100),
+    text: cleanText, createdAt: new Date().toISOString()
+  };
+  const path = `messages/${id}`;
+  await commitFirestoreTransaction(projectId, accessToken, null, [{
+    update: { name: `projects/${projectId}/databases/(default)/documents/${path}`, fields: convertToFirestoreFields(message) },
+    currentDocument: { exists: false }
+  }]);
+  return message;
+}
+
+async function handleManagementMessages(request, callerUid, callerRole, projectId, accessToken, corsHeaders) {
+  if (request.method === 'GET') {
+    const workerId = new URL(request.url).searchParams.get('workerId') || '';
+    if (!RESOURCE_ID_REGEX.test(workerId)) throw createHttpError('اختر عاملاً صحيحاً لعرض المحادثة', 400, 'missing_worker');
+    const workerDoc = await getFirestoreDoc(projectId, accessToken, `workers/${workerId}`);
+    if (!workerDoc) throw createHttpError('العامل غير موجود', 404, 'worker_not_found');
+    const messages = await readConversation(workerId, projectId, accessToken);
+    return jsonResponse({ success: true, data: messages }, 200, corsHeaders);
+  }
+  const payload = await parseJsonBody(request);
+  const workerId = typeof payload?.workerId === 'string' ? payload.workerId.trim() : '';
+  if (!RESOURCE_ID_REGEX.test(workerId)) throw createHttpError('اختر عاملاً صحيحاً لإرسال الرسالة', 400, 'missing_worker');
+  const userDoc = await getFirestoreDoc(projectId, accessToken, `users/${callerUid}`);
+  const user = userDoc ? convertFromFirestoreFields(userDoc.fields || {}) : {};
+  const message = await saveConversationMessage(workerId, callerUid, callerRole, user.displayName || user.email || 'المسؤول', payload.text, projectId, accessToken);
+  return jsonResponse({ success: true, data: message }, 201, corsHeaders);
+}
+
+async function handleWorkerMessages(request, workerId, projectId, accessToken, corsHeaders) {
+  const workerDoc = await getFirestoreDoc(projectId, accessToken, `workers/${workerId}`);
+  if (!workerDoc || convertFromFirestoreFields(workerDoc.fields || {}).status !== 'active') {
+    throw createHttpError('حساب العامل غير نشط', 403, 'worker_inactive');
+  }
+  if (request.method === 'GET') {
+    const messages = await readConversation(workerId, projectId, accessToken);
+    return jsonResponse({ success: true, data: messages }, 200, corsHeaders);
+  }
+  const payload = await parseJsonBody(request);
+  const worker = convertFromFirestoreFields(workerDoc.fields || {});
+  const message = await saveConversationMessage(workerId, workerId, 'worker', worker.name || 'العامل', payload.text, projectId, accessToken);
+  return jsonResponse({ success: true, data: message }, 201, corsHeaders);
+}
+
+
+
+async function getActiveContact(uid, projectId, accessToken) {
+  const userDoc = await getFirestoreDoc(projectId, accessToken, `users/${uid}`);
+  if (userDoc) {
+    const user = convertFromFirestoreFields(userDoc.fields || {});
+    if (user.status !== 'active' || !['super_admin', 'admin', 'responsible'].includes(user.role)) return null;
+    return { uid, displayName: String(user.displayName || user.name || user.email || 'مستخدم').slice(0, 80), role: user.role, status: user.status };
+  }
+  const workerDoc = await getFirestoreDoc(projectId, accessToken, `workers/${uid}`);
+  if (workerDoc) {
+    const worker = convertFromFirestoreFields(workerDoc.fields || {});
+    if (worker.status !== 'active') return null;
+    return { uid, displayName: String(worker.name || 'مشرف العمال').slice(0, 80), role: 'worker', status: worker.status };
+  }
+  return null;
+}
+
+export function isExactParticipantPair(participants, uidA, uidB) {
+  return Array.isArray(participants) && participants.length === 2 && new Set(participants).size === 2 && participants.includes(uidA) && participants.includes(uidB);
+}
+
+async function buildDirectConversationId(uidA, uidB) {
+  const pair = [uidA, uidB].sort();
+  const digest = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(pair.join(':')));
+  return `conv_${bytesToBase64Url(new Uint8Array(digest))}`;
+}
+
+export function firestoreDocumentId(documentName) {
+  if (typeof documentName !== 'string') return '';
+  const parts = documentName.split('/').filter(Boolean);
+  return parts.length ? parts[parts.length - 1] : '';
+}
+
+async function handleListContacts(callerUid, projectId, accessToken, corsHeaders) {
+  const [usersResult, workersResult] = await Promise.all([
+    listAllFirestoreDocs(projectId, accessToken, 'users', 100, 500),
+    listAllFirestoreDocs(projectId, accessToken, 'workers', 100, 500)
+  ]);
+  // Firestore REST documents always carry their document path, even when
+  // older profile records do not contain a duplicated uid/id field.
+  const users = usersResult.documents.map(doc => {
+    const user = convertFromFirestoreFields(doc.fields || {});
+    return { ...user, uid: user.uid || user.id || firestoreDocumentId(doc.name) };
+  })
+    .filter(user => user.uid && user.uid !== callerUid && user.status === 'active' && ['super_admin', 'admin', 'responsible'].includes(user.role))
+    .map(user => ({ uid: user.uid, name: String(user.displayName || user.name || 'مستخدم').slice(0, 80), role: user.role }));
+  const workers = workersResult.documents.map(doc => {
+    const worker = convertFromFirestoreFields(doc.fields || {});
+    return { ...worker, uid: worker.id || worker.workerId || firestoreDocumentId(doc.name) };
+  })
+    .filter(worker => worker.uid && worker.uid !== callerUid && worker.status === 'active')
+    .map(worker => ({ uid: worker.uid, name: String(worker.name || 'مشرف العمال').slice(0, 80), role: 'worker' }));
+  const contacts = [...users, ...workers].sort((a, b) => a.name.localeCompare(b.name, 'ar'));
+  return jsonResponse({ success: true, data: contacts }, 200, corsHeaders);
+}
+
+async function readDirectConversation(conversationId, uidA, uidB, projectId, accessToken) {
+  const url = `${FIRESTORE_BASE_URL}/${projectId}/databases/(default)/documents:runQuery`;
+  const response = await fetch(url, {
+    method: 'POST',
+    headers: { Authorization: `Bearer ${accessToken}`, 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      structuredQuery: {
+        from: [{ collectionId: 'messages' }],
+        where: { fieldFilter: { field: { fieldPath: 'conversationId' }, op: 'EQUAL', value: { stringValue: conversationId } } },
+        // Avoid requiring a composite Firestore index: retrieve a bounded history,
+        // then sort the selected conversation locally by its server timestamp.
+        limit: 1000
+      }
+    })
+  });
+  if (!response.ok) throw createHttpError('تعذر تحميل المحادثة الخاصة', 500, 'direct_messages_read_failed');
+  const rows = await response.json();
+  return rows.filter(row => row.document).map(row => {
+    const message = convertFromFirestoreFields(row.document.fields || {});
+    // Defense in depth: do not return any message whose own participant list
+    // does not match the exact two users, even if its conversationId matches.
+    if (!isExactParticipantPair(message.participants, uidA, uidB)) return null;
+    message.id = message.id || firestoreDocumentId(row.document.name);
+    return message;
+  }).filter(Boolean).sort((a, b) => String(a.createdAt || '').localeCompare(String(b.createdAt || '')));
+}
+
+async function handleDirectMessages(request, otherUid, callerUid, callerRole, projectId, accessToken, corsHeaders) {
+  if (!/^[A-Za-z0-9_-]{3,128}$/.test(otherUid) || otherUid === callerUid) throw createHttpError('اختر مستخدماً آخر صالحاً لبدء المحادثة', 400, 'invalid_direct_recipient');
+  const [sender, recipient] = await Promise.all([
+    getActiveContact(callerUid, projectId, accessToken),
+    getActiveContact(otherUid, projectId, accessToken)
+  ]);
+  if (!sender) throw createHttpError('حسابك غير نشط أو غير موجود', 403, 'sender_inactive');
+  if (!recipient) throw createHttpError('المستخدم المطلوب غير موجود أو غير نشط', 404, 'recipient_unavailable');
+  const conversationId = await buildDirectConversationId(callerUid, otherUid);
+  const conversationPath = `conversations/${conversationId}`;
+  const conversationDoc = await getFirestoreDoc(projectId, accessToken, conversationPath);
+  if (request.method === 'GET') {
+    if (!conversationDoc) return jsonResponse({ success: true, data: [] }, 200, corsHeaders);
+    const conversation = convertFromFirestoreFields(conversationDoc.fields || {});
+    if (!isExactParticipantPair(conversation.participants, callerUid, otherUid)) {
+      throw createHttpError('لا تملك صلاحية الاطلاع على هذه المحادثة', 403, 'direct_conversation_forbidden');
+    }
+    const messages = await readDirectConversation(conversationId, callerUid, otherUid, projectId, accessToken);
+    return jsonResponse({ success: true, data: messages }, 200, corsHeaders);
+  }
+  const payload = await parseJsonBody(request);
+  const cleanText = typeof payload?.text === 'string' ? payload.text.trim() : '';
+  if (!cleanText || cleanText.length > 2000) throw createHttpError('اكتب رسالة لا تتجاوز 2000 حرف', 400, 'invalid_message');
+  const now = new Date().toISOString();
+  const messageId = `dm_${crypto.randomUUID().replace(/-/g, '')}`;
+  const conversation = {
+    id: conversationId,
+    participants: [callerUid, otherUid].sort(),
+    createdAt: conversationDoc ? convertFromFirestoreFields(conversationDoc.fields || {}).createdAt : now,
+    updatedAt: now,
+    lastMessageAt: now
+  };
+  const message = {
+    id: messageId, conversationId, participants: conversation.participants,
+    senderUid: callerUid, recipientUid: otherUid, senderRole: callerRole,
+    senderName: sender.displayName, recipientName: recipient.displayName,
+    text: cleanText, createdAt: now
+  };
+  const conversationWrite = { update: { name: `projects/${projectId}/databases/(default)/documents/${conversationPath}`, fields: convertToFirestoreFields(conversation) } };
+  conversationWrite.currentDocument = conversationDoc?.updateTime ? { updateTime: conversationDoc.updateTime } : { exists: false };
+  const messageWrite = { update: { name: `projects/${projectId}/databases/(default)/documents/messages/${messageId}`, fields: convertToFirestoreFields(message) }, currentDocument: { exists: false } };
+  await commitFirestoreTransaction(projectId, accessToken, null, [conversationWrite, messageWrite]);
+  return jsonResponse({ success: true, data: message }, 201, corsHeaders);
+}
+
+export function getCycleReportWriteDecision(previous, incoming) {
+  if (!previous || typeof previous !== 'object') return 'write';
+
+  const previousTime = Date.parse(previous.recordedAt || '');
+  const incomingTime = Date.parse(incoming.recordedAt || '');
+  if (!Number.isFinite(incomingTime)) {
+    throw createHttpError('وقت تسجيل التقرير غير صالح', 400, 'invalid_cycle_recorded_at');
+  }
+
+  // Legacy reports without a valid recordedAt can still be updated.
+  if (!Number.isFinite(previousTime)) return 'write';
+
+  if (previousTime > incomingTime) {
+    throw createHttpError(
+      'يوجد تقرير أحدث محفوظ لهذا اليوم؛ رُفض التقرير القديم القادم من المزامنة',
+      409,
+      'stale_cycle_report'
+    );
+  }
+
+  if (previousTime === incomingTime) {
+    const isSameSubmission =
+      previous.workerId === incoming.workerId &&
+      previous.count === incoming.count &&
+      previous.photo === incoming.photo;
+    if (isSameSubmission) return 'duplicate';
+    throw createHttpError(
+      'يوجد تقرير مختلف مسجل بنفس وقت التسجيل؛ لم يتم استبدال التقرير المحفوظ',
+      409,
+      'cycle_report_timestamp_conflict'
+    );
+  }
+
+  return 'write';
+}
+
+export function resolveCycleRecordedAt(clientRecordedAt, serverNow = new Date()) {
+  if (clientRecordedAt === undefined || clientRecordedAt === null || clientRecordedAt === '') {
+    return serverNow.toISOString();
+  }
+  if (typeof clientRecordedAt !== 'string') {
+    throw createHttpError('وقت تسجيل التقرير غير صالح', 400, 'invalid_cycle_recorded_at');
+  }
+  const parsed = new Date(clientRecordedAt);
+  if (!Number.isFinite(parsed.getTime()) || parsed.toISOString() !== clientRecordedAt) {
+    throw createHttpError('وقت تسجيل التقرير غير صالح', 400, 'invalid_cycle_recorded_at');
+  }
+  if (parsed.getTime() > serverNow.getTime() + 5 * 60 * 1000) {
+    throw createHttpError('وقت تسجيل التقرير لا يمكن أن يكون في المستقبل', 400, 'future_cycle_recorded_at');
+  }
+  return parsed.toISOString();
+}
+
+async function handleWorkerCycles(request, workerId, projectId, accessToken, corsHeaders) {
+  const workerDoc = await getFirestoreDoc(projectId, accessToken, `workers/${workerId}`);
+  if (!workerDoc) throw createHttpError('حساب مشرف العمال غير موجود', 403, 'worker_inactive');
+  const worker = convertFromFirestoreFields(workerDoc.fields || {});
+  if (worker.status !== 'active') throw createHttpError('حساب مشرف العمال غير نشط', 403, 'worker_inactive');
+  if (![1, 2, 3].includes(worker.machineNumber) || !['day', 'night'].includes(worker.shift)) {
+    throw createHttpError('لم يحدد المشرف العام المكينة والوردية لهذا الحساب بعد', 409, 'machine_assignment_missing');
+  }
+  if (request.method === 'GET') {
+    const url = new URL(request.url);
+    const requested = Number(url.searchParams.get('pageSize') || '100');
+    const pageSize = Number.isInteger(requested) ? Math.min(Math.max(requested, 1), 200) : 100;
+    const pageToken = url.searchParams.get('pageToken') || null;
+    const rows = await listFirestoreDocs(projectId, accessToken, 'machine_cycles', pageSize, pageToken, '__name__ desc', ['id', 'machineNumber', 'shift', 'date', 'count', 'workerId', 'workerName', 'recordedAt', 'receivedAt', 'hasPhoto']);
+    const reports = rows.documents.map(doc => convertFromFirestoreFields(doc.fields || {}))
+      .filter(item => item.workerId === workerId)
+      .sort((a, b) => String(b.recordedAt || '').localeCompare(String(a.recordedAt || '')))
+      .map(report => ({ ...report, hasPhoto: report.hasPhoto !== false }));
+    return jsonResponse({ success: true, data: reports, nextPageToken: rows.nextPageToken }, 200, corsHeaders);
+  }
+  const payload = await parseJsonBody(request, 700 * 1024);
+  if (!Number.isSafeInteger(payload?.count) || payload.count < 0 || payload.count > 100000000) {
+    throw createHttpError('عدد الدورات يجب أن يكون عدداً صحيحاً غير سالب', 400, 'invalid_cycle_count');
+  }
+  const photo = typeof payload.photo === 'string' ? payload.photo : '';
+  if (!photo || photo.length > 480000 || !/^data:image\/(?:jpeg|webp);base64,[A-Za-z0-9+/]+={0,2}$/.test(photo)) {
+    throw createHttpError('صورة العداد غير صالحة أو حجمها كبير؛ أعد اختيار صورة مضغوطة', 400, 'invalid_counter_photo');
+  }
+  const receivedAt = new Date();
+  const recordedAt = resolveCycleRecordedAt(payload.recordedAt, receivedAt);
+  const dateParts = new Intl.DateTimeFormat('en-GB', { timeZone: 'Africa/Tunis', year: 'numeric', month: '2-digit', day: '2-digit' }).formatToParts(new Date(recordedAt));
+  const datePart = Object.fromEntries(dateParts.filter(part => part.type !== 'literal').map(part => [part.type, part.value]));
+  const date = `${datePart.year}-${datePart.month}-${datePart.day}`;
+  const shift = worker.shift;
+  const machineNumber = worker.machineNumber;
+  const id = `mc_${date.replace(/-/g, '')}_${machineNumber}_${shift}`;
+  const path = `machine_cycles/${id}`;
+  const existing = await getFirestoreDoc(projectId, accessToken, path);
+  let previous = null;
+  if (existing) {
+    previous = convertFromFirestoreFields(existing.fields || {});
+    if (previous.workerId !== workerId) throw createHttpError('تم تسجيل تقرير هذه المكينة والوردية لهذا اليوم بواسطة حساب آخر', 409, 'cycle_report_exists');
+    const writeDecision = getCycleReportWriteDecision(previous, { workerId, count: payload.count, photo, recordedAt });
+    if (writeDecision === 'duplicate') {
+      const { photo: _storedPhoto, ...publicPrevious } = previous;
+      return jsonResponse({ success: true, data: { ...publicPrevious, hasPhoto: previous.hasPhoto !== false } }, 200, corsHeaders);
+    }
+  }
+  const record = {
+    id, machineNumber, shift, date, count: payload.count, photo, hasPhoto: true,
+    workerId, workerName: String(worker.name || 'مشرف العمال').slice(0, 100),
+    recordedAt, receivedAt: receivedAt.toISOString(), updatedAt: receivedAt.toISOString()
+  };
+  const write = {
+    update: { name: `projects/${projectId}/databases/(default)/documents/${path}`, fields: convertToFirestoreFields(record) },
+    currentDocument: existing?.updateTime ? { updateTime: existing.updateTime } : { exists: false }
+  };
+  await commitFirestoreTransaction(projectId, accessToken, null, [write]);
+  return jsonResponse({ success: true, data: { ...record, photo: undefined } }, existing ? 200 : 201, corsHeaders);
+}
+
+
+async function handleCyclePhoto(id, projectId, accessToken, corsHeaders) {
+  if (!/^mc_[0-9]{8}_[123]_(?:day|night)$/.test(id)) throw createHttpError('معرّف تقرير الدورات غير صالح', 400, 'invalid_cycle_id');
+  const doc = await getFirestoreDoc(projectId, accessToken, `machine_cycles/${id}`);
+  if (!doc) throw createHttpError('تقرير الدورات غير موجود', 404, 'cycle_report_not_found');
+  const record = convertFromFirestoreFields(doc.fields || {});
+  if (typeof record.photo !== 'string' || !record.photo.startsWith('data:image/')) throw createHttpError('صورة العداد غير متوفرة', 404, 'cycle_photo_not_found');
+  return jsonResponse({ success: true, data: { id, photo: record.photo } }, 200, corsHeaders);
+}
+
+async function handleListCycles(request, projectId, accessToken, corsHeaders) {
+  const url = new URL(request.url);
+  const requested = Number(url.searchParams.get('pageSize') || '100');
+  const pageSize = Number.isInteger(requested) ? Math.min(Math.max(requested, 1), 200) : 100;
+  const pageToken = url.searchParams.get('pageToken') || null;
+  // Fetch a bounded page, newest machine-cycle reports first. The client can
+  // request older pages without loading an ever-growing collection at once.
+  const result = await listFirestoreDocs(projectId, accessToken, 'machine_cycles', pageSize, pageToken, '__name__ desc', ['id', 'machineNumber', 'shift', 'date', 'count', 'workerId', 'workerName', 'recordedAt', 'receivedAt', 'hasPhoto']);
+  const data = result.documents.map(doc => convertFromFirestoreFields(doc.fields || {}))
+    .sort((a, b) => String(b.recordedAt || '').localeCompare(String(a.recordedAt || '')))
+    .map(report => ({ ...report, hasPhoto: report.hasPhoto !== false }));
+  return jsonResponse({ success: true, data, nextPageToken: result.nextPageToken }, 200, corsHeaders);
+}
+
 async function handleWorkerListTasks(workerId, projectId, accessToken, corsHeaders) {
   const workerDoc = await getFirestoreDoc(projectId, accessToken, `workers/${workerId}`);
   if (!workerDoc || convertFromFirestoreFields(workerDoc.fields || {}).status !== 'active') {
     throw createHttpError('حساب العامل غير نشط', 403, 'worker_inactive');
   }
-  const result = await listFirestoreDocs(projectId, accessToken, 'tasks', 100);
+  const result = await listAllFirestoreDocs(projectId, accessToken, 'tasks', 100, 500);
   const tasks = result.documents
     .map(doc => convertFromFirestoreFields(doc.fields || {}))
     .filter(task => task.assignedWorkerId === workerId)
     .map(task => sanitizeResourceOutput(task, 'tasks'));
   return jsonResponse({ success: true, tasks }, 200, corsHeaders);
+}
+
+async function handleWorkerTaskStatus(request, taskId, workerId, projectId, accessToken, corsHeaders) {
+  const workerDoc = await getFirestoreDoc(projectId, accessToken, `workers/${workerId}`);
+  if (!workerDoc || convertFromFirestoreFields(workerDoc.fields || {}).status !== 'active') {
+    throw createHttpError('حساب العامل غير نشط', 403, 'worker_inactive');
+  }
+  const payload = await parseJsonBody(request);
+  if (!payload || !['pending', 'in_progress'].includes(payload.status)) {
+    throw createHttpError('يمكن للعامل تعليق المهمة أو استئنافها فقط', 400, 'invalid_task_status');
+  }
+  const taskDoc = await getFirestoreDoc(projectId, accessToken, `tasks/${taskId}`);
+  if (!taskDoc) throw createHttpError('المهمة المطلوبة غير موجودة', 404, 'task_not_found');
+  const task = convertFromFirestoreFields(taskDoc.fields || {});
+  if (task.assignedWorkerId !== workerId) {
+    throw createHttpError('لا يمكنك تغيير حالة مهمة غير مسندة إليك', 403, 'task_not_assigned');
+  }
+  if (['completed', 'cancelled'].includes(task.status) || Number(task.completedQuantity || 0) >= Number(task.targetQuantity || 0)) {
+    throw createHttpError('لا يمكن تغيير حالة مهمة مكتملة أو ملغاة', 409, 'task_not_changeable');
+  }
+  const now = new Date().toISOString();
+  const record = { ...task, status: payload.status, updatedBy: workerId, updatedAt: now };
+  await commitFirestoreTransaction(projectId, accessToken, null, [{
+    update: {
+      name: `projects/${projectId}/databases/(default)/documents/tasks/${taskId}`,
+      fields: convertToFirestoreFields(record)
+    },
+    currentDocument: { updateTime: taskDoc.updateTime }
+  }]);
+  return jsonResponse({ success: true, task: sanitizeResourceOutput(record, 'tasks') }, 200, corsHeaders);
+}
+
+export function assertWorkerTaskProgressAccess(task, workerId) {
+  if (!task || task.assignedWorkerId !== workerId) {
+    throw createHttpError('لا يمكنك تحديث مهمة غير مسندة إليك', 403, 'task_not_assigned');
+  }
+  // Do not reject completed/cancelled status here: handleTaskProgress must
+  // first check the idempotency ledger so a retry of an already committed
+  // mutation can safely return duplicate success after a lost response.
+  return true;
 }
 
 async function handleWorkerTaskProgress(request, taskId, workerId, projectId, accessToken, corsHeaders) {
@@ -443,8 +1471,7 @@ async function handleWorkerTaskProgress(request, taskId, workerId, projectId, ac
   const taskDoc = await getFirestoreDoc(projectId, accessToken, `tasks/${taskId}`);
   if (!taskDoc) throw createHttpError('المهمة غير موجودة', 404, 'task_not_found');
   const task = convertFromFirestoreFields(taskDoc.fields || {});
-  if (task.assignedWorkerId !== workerId) throw createHttpError('لا يمكنك تحديث مهمة غير مسندة إليك', 403, 'task_not_assigned');
-  if (task.status === 'cancelled' || task.status === 'completed') throw createHttpError('هذه المهمة مغلقة', 409, 'task_closed');
+  assertWorkerTaskProgressAccess(task, workerId);
   return handleTaskProgress(request, taskId, workerId, projectId, accessToken, corsHeaders, workerId);
 }
 
@@ -457,7 +1484,7 @@ async function handleSetWorkerPin(request, workerId, callerUid, projectId, acces
   if (!worker) throw createHttpError('العامل المطلوب غير موجود', 404, 'worker_not_found');
   const salt = bytesToBase64Url(crypto.getRandomValues(new Uint8Array(16)));
   const pinHash = await computePinPbkdf2(salt, payload.pin);
-  const pinRecord = { workerId, pin_hash: pinHash, pin_salt: salt, pin_algo: 'pbkdf2-sha256-v1', updatedBy: callerUid, updatedAt: new Date().toISOString() };
+  const pinRecord = { workerId, pin_hash: pinHash, pin_salt: salt, pin_algo: 'pbkdf2-sha256-v2', pin_iterations: 100000, updatedBy: callerUid, updatedAt: new Date().toISOString() };
   const pinPath = `worker_pins/${workerId}`;
   const existingPinDoc = await getFirestoreDoc(projectId, accessToken, pinPath);
   const pinWrite = {
@@ -492,9 +1519,16 @@ async function handleTaskProgress(request, taskId, callerUid, projectId, accessT
     if (previous.taskId !== taskId || previous.quantity !== payload.quantity) {
       throw createHttpError('معرّف العملية مستخدم لعملية إنجاز مختلفة', 409, 'mutation_id_conflict');
     }
+    if (previous.createdBy !== callerUid) {
+      throw createHttpError('لا يمكنك إعادة استخدام معرّف إنجاز تابع لمستخدم آخر', 403, 'mutation_owner_mismatch');
+    }
     const latestDoc = await getFirestoreDoc(projectId, accessToken, `tasks/${taskId}`);
     if (!latestDoc) throw createHttpError('المهمة المطلوبة غير موجودة', 404, 'task_not_found');
-    const latest = sanitizeResourceOutput(convertFromFirestoreFields(latestDoc.fields || {}), 'tasks');
+    const latestRecord = convertFromFirestoreFields(latestDoc.fields || {});
+    if (expectedWorkerId && latestRecord.assignedWorkerId !== expectedWorkerId) {
+      throw createHttpError('لا يمكنك الاطلاع على مهمة غير مسندة إليك', 403, 'task_not_assigned');
+    }
+    const latest = sanitizeResourceOutput(latestRecord, 'tasks');
     return jsonResponse({ success: true, task: latest, duplicate: true }, 200, corsHeaders);
   }
 
@@ -503,6 +1537,12 @@ async function handleTaskProgress(request, taskId, callerUid, projectId, accessT
   const current = convertFromFirestoreFields(currentDoc.fields || {});
   if (expectedWorkerId && current.assignedWorkerId !== expectedWorkerId) {
     throw createHttpError('لا يمكنك تحديث مهمة غير مسندة إليك', 403, 'task_not_assigned');
+  }
+  if (expectedWorkerId && current.status === 'pending') {
+    throw createHttpError('هذه المهمة معلّقة؛ استأنفها أولاً قبل تسجيل الإنجاز', 409, 'task_is_paused');
+  }
+  if (['completed', 'cancelled'].includes(current.status)) {
+    throw createHttpError('لا يمكن تسجيل إنجاز لمهمة مكتملة أو ملغاة', 409, 'task_not_changeable');
   }
   const targetQuantity = Number(current.targetQuantity || 0);
   const completedQuantity = Number(current.completedQuantity || 0) + payload.quantity;
@@ -539,11 +1579,28 @@ async function handleTaskProgress(request, taskId, callerUid, projectId, accessT
     if (!racedMutation) throw err;
     const raced = convertFromFirestoreFields(racedMutation.fields || {});
     if (raced.taskId !== taskId || raced.quantity !== payload.quantity) throw createHttpError('معرّف العملية مستخدم لعملية إنجاز مختلفة', 409, 'mutation_id_conflict');
+    if (raced.createdBy !== callerUid) throw createHttpError('لا يمكنك إعادة استخدام معرّف إنجاز تابع لمستخدم آخر', 403, 'mutation_owner_mismatch');
     const latestDoc = await getFirestoreDoc(projectId, accessToken, `tasks/${taskId}`);
     if (!latestDoc) throw createHttpError('المهمة المطلوبة غير موجودة', 404, 'task_not_found');
-    return jsonResponse({ success: true, task: sanitizeResourceOutput(convertFromFirestoreFields(latestDoc.fields || {}), 'tasks'), duplicate: true }, 200, corsHeaders);
+    const latestRecord = convertFromFirestoreFields(latestDoc.fields || {});
+    if (expectedWorkerId && latestRecord.assignedWorkerId !== expectedWorkerId) throw createHttpError('لا يمكنك الاطلاع على مهمة غير مسندة إليك', 403, 'task_not_assigned');
+    return jsonResponse({ success: true, task: sanitizeResourceOutput(latestRecord, 'tasks'), duplicate: true }, 200, corsHeaders);
   }
   return jsonResponse({ success: true, task: sanitizeResourceOutput(record, 'tasks'), duplicate: false }, 200, corsHeaders);
+}
+
+export function sanitizeWorkerOutputForRole(record, callerRole) {
+  const clean = sanitizeResourceOutput(record, 'workers');
+  if (callerRole === 'responsible') {
+    return {
+      id: clean.id,
+      name: clean.name,
+      status: clean.status,
+      machineNumber: clean.machineNumber,
+      shift: clean.shift
+    };
+  }
+  return clean;
 }
 
 function sanitizeResourceOutput(record, resource) {
@@ -563,7 +1620,8 @@ async function handleListModels(request, projectId, accessToken, corsHeaders) {
     : 50;
   const search = (url.searchParams.get('q') || '').trim().toLocaleLowerCase();
   const category = url.searchParams.get('category') || '';
-  const result = await listFirestoreDocs(projectId, accessToken, 'models', pageSize);
+  const pageToken = url.searchParams.get('pageToken') || null;
+  const result = await listFirestoreDocs(projectId, accessToken, 'models', pageSize, pageToken, '__name__');
   const models = result.documents
     .map((document) => convertFromFirestoreFields(document.fields || {}))
     .filter((model) => !category || model.category === category)
@@ -942,14 +2000,30 @@ export async function normalizeModelName(rawName) {
   return { original, normalized: canonical, hash };
 }
 
-async function computePinPbkdf2(salt, pin) {
+const PIN_PBKDF2_ITERATIONS = 100000;
+
+export async function computePinPbkdf2(salt, pin) {
   const material = await crypto.subtle.importKey('raw', new TextEncoder().encode(pin), 'PBKDF2', false, ['deriveBits']);
   const bits = await crypto.subtle.deriveBits(
-    { name: 'PBKDF2', salt: new TextEncoder().encode(salt), iterations: 120000, hash: 'SHA-256' },
+    { name: 'PBKDF2', salt: new TextEncoder().encode(salt), iterations: PIN_PBKDF2_ITERATIONS, hash: 'SHA-256' },
     material,
     256
   );
   return Array.from(new Uint8Array(bits)).map(byte => byte.toString(16).padStart(2, '0')).join('');
+}
+
+export async function computeStoredPinHash(record, pin, label) {
+  if (record?.pin_algo === 'pbkdf2-sha256-v1') {
+    throw createHttpError(`تم تحديث حماية رموز الدخول. يلزم إعادة تعيين ${label} من حساب المشرف العام قبل تسجيل الدخول.`, 409, 'pin_reset_required');
+  }
+  if (record?.pin_algo === 'pbkdf2-sha256-v2') {
+    const iterations = Number(record.pin_iterations || PIN_PBKDF2_ITERATIONS);
+    if (!Number.isInteger(iterations) || iterations !== PIN_PBKDF2_ITERATIONS) {
+      throw createHttpError('إعداد حماية رمز الدخول غير صالح؛ يلزم إعادة تعيين الرمز من المشرف العام.', 409, 'pin_reset_required');
+    }
+    return computePinPbkdf2(record.pin_salt, pin);
+  }
+  return computeWebCryptoSha256(`${record.pin_salt}:${pin}`);
 }
 
 export async function computeWebCryptoSha256(str) {
@@ -1495,7 +2569,7 @@ async function importPkcs8PrivateKey(pem) {
 // ==========================================
 // RBAC & FIRESTORE TRANSACTIONS
 // ==========================================
-async function verifySuperAdminRole(uid, projectId, accessToken) {
+async function verifyManagementRole(uid, projectId, accessToken) {
   const url = `${FIRESTORE_BASE_URL}/${projectId}/databases/(default)/documents/users/${uid}`;
   const resp = await fetch(url, {
     headers: { Authorization: `Bearer ${accessToken}` },
@@ -1510,10 +2584,10 @@ async function verifySuperAdminRole(uid, projectId, accessToken) {
 
   const doc = await resp.json();
   const fields = convertFromFirestoreFields(doc.fields || {});
-
-  if (fields.role !== 'super_admin' || fields.status !== 'active') {
-    throw createHttpError('ليس لديك صلاحية المدير العام (super_admin) أو الحساب غير نشط', 403, 'forbidden');
+  if (!['admin', 'super_admin', 'responsible'].includes(fields.role) || fields.status !== 'active') {
+    throw createHttpError('يلزم حساب مسؤول أو مشرف نشط لتنفيذ هذه العملية', 403, 'forbidden');
   }
+  return fields.role;
 }
 
 async function beginFirestoreTransaction(projectId, accessToken) {
@@ -1546,7 +2620,7 @@ async function commitFirestoreTransaction(projectId, accessToken, transactionId,
   if (!resp.ok) {
     const errMsg = resData?.error?.message || 'فشل تثبيت المعاملة الذرية';
     if (errMsg.includes('ALREADY_EXISTS') || errMsg.includes('ABORTED') || errMsg.includes('FAILED_PRECONDITION')) {
-      throw createHttpError('تعارض في الحجز أو أن اسم الموديل محجوز بالفعل لموديل آخر', 409, 'conflict');
+      throw createHttpError('تعارضت العملية مع تعديل متزامن؛ حدّث البيانات ثم حاول مجدداً', 409, 'conflict');
     }
     throw createHttpError(`فشل إتمام المعاملة: ${errMsg}`, 500, 'tx_commit_failed');
   }
@@ -1580,49 +2654,88 @@ async function getFirestoreDoc(projectId, accessToken, path, transactionId) {
   return await resp.json();
 }
 
-async function listFirestoreDocs(projectId, accessToken, collection, pageSize) {
+async function listFirestoreDocs(projectId, accessToken, collection, pageSize, pageToken, orderBy, fieldMask) {
   const url = new URL(`${FIRESTORE_BASE_URL}/${projectId}/databases/(default)/documents/${collection}`);
   url.searchParams.set('pageSize', String(pageSize));
+  if (pageToken) url.searchParams.set('pageToken', pageToken);
+  if (orderBy) url.searchParams.set('orderBy', orderBy);
+  if (Array.isArray(fieldMask)) {
+    for (const fieldPath of fieldMask) url.searchParams.append('mask.fieldPaths', fieldPath);
+  }
   const resp = await fetch(url, {
     headers: { Authorization: `Bearer ${accessToken}` },
   });
+  const responseText = await resp.text();
+  let data = null;
+  try { data = responseText ? JSON.parse(responseText) : null; } catch { /* Keep provider response details out of the client response. */ }
   if (!resp.ok) {
-    throw createHttpError('فشل قراءة قائمة الموديلات من Firestore', 500, 'collection_read_failed');
+    const providerCode = data?.error?.status || 'UNKNOWN';
+    const providerMessage = String(data?.error?.message || responseText || 'No provider details').slice(0, 500);
+    console.error('[Firestore collection read failed]', { collection, httpStatus: resp.status, providerCode, providerMessage });
+    const isPermissionError = resp.status === 401 || resp.status === 403;
+    throw createHttpError(
+      `فشل قراءة قائمة الموديلات من Firestore (HTTP ${resp.status} - ${providerCode})`,
+      isPermissionError ? 403 : 500,
+      `collection_read_failed_${providerCode.toLowerCase()}`
+    );
   }
-  const data = await resp.json();
+  if (!data) throw createHttpError('استجابة Firestore غير صالحة عند قراءة قائمة الموديلات', 502, 'invalid_firestore_response');
   return {
     documents: Array.isArray(data.documents) ? data.documents : [],
     nextPageToken: data.nextPageToken || null,
   };
 }
 
+async function listAllFirestoreDocs(projectId, accessToken, collection, pageSize = 100, maxDocuments = 500) {
+  const documents = [];
+  let pageToken = null;
+  do {
+    const remaining = maxDocuments - documents.length;
+    if (remaining <= 0) {
+      throw createHttpError('تجاوز عدد السجلات الحد الآمن للقراءة؛ لم تُستخدم قائمة ناقصة لاتخاذ القرار', 503, 'collection_read_limit_exceeded');
+    }
+    const page = await listFirestoreDocs(projectId, accessToken, collection, Math.min(pageSize, remaining), pageToken);
+    documents.push(...page.documents);
+    pageToken = page.nextPageToken;
+  } while (pageToken);
+  return { documents, nextPageToken: null };
+}
+
 // Convert native JS object to Firestore REST API fields
+function convertToFirestoreValue(value) {
+  if (value === null) return { nullValue: null };
+  if (typeof value === 'string') return { stringValue: value };
+  if (typeof value === 'number') return Number.isInteger(value) ? { integerValue: String(value) } : { doubleValue: value };
+  if (typeof value === 'boolean') return { booleanValue: value };
+  if (Array.isArray(value)) return { arrayValue: { values: value.map(convertToFirestoreValue) } };
+  if (typeof value === 'object') return { mapValue: { fields: convertToFirestoreFields(value) } };
+  throw new TypeError('Unsupported Firestore value type');
+}
+
 export function convertToFirestoreFields(obj) {
   const fields = {};
-  for (const [key, value] of Object.entries(obj)) {
+  for (const [key, value] of Object.entries(obj || {})) {
     if (value === undefined) continue;
-    if (typeof value === 'string') fields[key] = { stringValue: value };
-    else if (typeof value === 'number') {
-      if (Number.isInteger(value)) fields[key] = { integerValue: String(value) };
-      else fields[key] = { doubleValue: value };
-    } else if (typeof value === 'boolean') fields[key] = { booleanValue: value };
-    else if (typeof value === 'object' && value !== null) {
-      fields[key] = { mapValue: { fields: convertToFirestoreFields(value) } };
-    }
+    fields[key] = convertToFirestoreValue(value);
   }
   return fields;
 }
 
+function convertFromFirestoreValue(value) {
+  if (value.stringValue !== undefined) return value.stringValue;
+  if (value.integerValue !== undefined) return parseInt(value.integerValue, 10);
+  if (value.doubleValue !== undefined) return value.doubleValue;
+  if (value.booleanValue !== undefined) return value.booleanValue;
+  if (value.nullValue !== undefined) return null;
+  if (value.arrayValue?.values) return value.arrayValue.values.map(convertFromFirestoreValue);
+  if (value.mapValue?.fields) return convertFromFirestoreFields(value.mapValue.fields);
+  return undefined;
+}
+
 export function convertFromFirestoreFields(fields) {
   const obj = {};
-  for (const [key, valObj] of Object.entries(fields || {})) {
-    if (valObj.stringValue !== undefined) obj[key] = valObj.stringValue;
-    else if (valObj.integerValue !== undefined) obj[key] = parseInt(valObj.integerValue, 10);
-    else if (valObj.doubleValue !== undefined) obj[key] = valObj.doubleValue;
-    else if (valObj.booleanValue !== undefined) obj[key] = valObj.booleanValue;
-    else if (valObj.mapValue?.fields) {
-      obj[key] = convertFromFirestoreFields(valObj.mapValue.fields);
-    }
+  for (const [key, value] of Object.entries(fields || {})) {
+    obj[key] = convertFromFirestoreValue(value);
   }
   return obj;
 }
@@ -1634,6 +2747,7 @@ export function getAllowedOrigins(env) {
   const allowed = new Set([
     'https://fc-founoun.web.app',
     'https://fc-founoun.firebaseapp.com',
+    'https://deploy-preview-3--fc-founoun.netlify.app',
     'http://localhost:3000',
     'http://localhost:5173',
     'http://127.0.0.1:3000',

@@ -7,6 +7,7 @@ import React, { useState, useEffect } from 'react';
 import { AdminLoginForm } from './components/AdminLoginForm';
 import { AdminDashboard } from './components/AdminDashboard';
 import { WorkerLogin } from './components/WorkerLogin';
+import { NamedCodeLogin } from './components/NamedCodeLogin';
 import { WorkerDashboard } from './components/WorkerDashboard';
 import { PWAInstallBadge } from './components/PWAInstallBadge';
 import { useOnlineStatus } from './hooks/useOnlineStatus';
@@ -16,7 +17,7 @@ import {
   auth,
   isFirebaseConfigured,
   getFirebaseConfigurationError,
-  verifySuperAdmin,
+  verifyAdmin,
   UserProfile,
   mapAuthorizationErrorToArabic,
 } from './lib/firebase';
@@ -25,7 +26,7 @@ export default function App() {
   const isOnline = useOnlineStatus();
   const [verifiedAdmin, setVerifiedAdmin] = useState<UserProfile | null>(null);
   const [verifiedWorker, setVerifiedWorker] = useState<{ id: string; name: string } | null>(null);
-  const [loginMode, setLoginMode] = useState<'admin' | 'worker'>('admin');
+  const [loginMode, setLoginMode] = useState<'super_admin' | 'admin' | 'responsible' | 'worker'>('super_admin');
   const [isCheckingInitialAuth, setIsCheckingInitialAuth] = useState(true);
   const [sessionError, setSessionError] = useState<string | null>(null);
   const [isLoggingOut, setIsLoggingOut] = useState(false);
@@ -47,7 +48,7 @@ export default function App() {
             setVerifiedAdmin(null);
             setSessionError(null);
           } else {
-            const profile = await verifySuperAdmin(user.uid);
+            const profile = await verifyAdmin(user.uid);
             setVerifiedAdmin(profile);
             setVerifiedWorker(null);
             setSessionError(null);
@@ -127,7 +128,7 @@ export default function App() {
             </div>
             <div className="flex flex-col">
               <span className="font-['Cinzel'] tracking-widest text-xs font-bold text-white">
-                FC.FOUNOUN
+                FONOUN CHAUSSURES
               </span>
               <span className="text-[10px] text-gray-400 font-['Cairo'] -mt-0.5">
                 فنون للأحذية الفاخرة
@@ -170,7 +171,7 @@ export default function App() {
 
               {/* Main Text Logo */}
               <h1 className="font-['Cinzel'] text-2xl sm:text-3xl font-bold tracking-[0.2em] text-white">
-                FC.FOUNOUN
+                FONOUN CHAUSSURES
               </h1>
 
               {/* Brand Sub-title */}
@@ -181,15 +182,20 @@ export default function App() {
                 </p>
                 <span className="h-px w-6 bg-gradient-to-l from-transparent to-[#D4AF37]/50"></span>
               </div>
+              <p className="mt-3 max-w-sm text-xs leading-6 text-gray-400">للبحث عن الموديلات وتنظيم أوامر الإنتاج ومتابعة إنجاز العمل.</p>
             </div>
 
             <div className="mb-3 grid w-full grid-cols-2 gap-2 rounded-xl border border-white/10 bg-[#111] p-1">
-              <button className={`tab-button ${loginMode === 'admin' ? 'tab-active' : ''}`} onClick={() => setLoginMode('admin')}>دخول المشرف</button>
-              <button className={`tab-button ${loginMode === 'worker' ? 'tab-active' : ''}`} onClick={() => setLoginMode('worker')}>دخول العامل</button>
+              <button className={`tab-button ${loginMode === 'super_admin' ? 'tab-active' : ''}`} onClick={() => setLoginMode('super_admin')}>المشرف العام</button>
+              <button className={`tab-button ${loginMode === 'admin' ? 'tab-active' : ''}`} onClick={() => setLoginMode('admin')}>المدير العام</button>
+              <button className={`tab-button ${loginMode === 'responsible' ? 'tab-active' : ''}`} onClick={() => setLoginMode('responsible')}>المسؤول</button>
+              <button className={`tab-button ${loginMode === 'worker' ? 'tab-active' : ''}`} onClick={() => setLoginMode('worker')}>مشرف العمال</button>
             </div>
-            {loginMode === 'admin' ? (
+            {loginMode === 'super_admin' ? (
               <AdminLoginForm onSuccess={(admin) => setVerifiedAdmin(admin)} externalError={sessionError} onClearExternalError={() => setSessionError(null)} />
-            ) : <WorkerLogin />}
+            ) : loginMode === 'admin' ? <NamedCodeLogin role="admin" title="دخول المدير العام" />
+            : loginMode === 'responsible' ? <NamedCodeLogin role="responsible" title="دخول المسؤول" />
+            : <WorkerLogin />}
           </div>
         )}
       </main>
@@ -198,7 +204,7 @@ export default function App() {
       <footer className="relative z-10 w-full border-t border-white/5 bg-[#070707] py-4 px-4 safe-pb text-center text-xs text-gray-500">
         <div className="max-w-4xl mx-auto flex flex-col sm:flex-row items-center justify-between gap-2 text-[11px]">
           <p className="text-gray-400">
-            جميع الحقوق محفوظة © {new Date().getFullYear()} FC.FOUNOUN
+            جميع الحقوق محفوظة © {new Date().getFullYear()} FONOUN CHAUSSURES
           </p>
           <div className="flex items-center gap-1.5 text-[#D4AF37]/80">
             <Sparkles className="w-3 h-3" />
