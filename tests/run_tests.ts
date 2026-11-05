@@ -48,6 +48,7 @@ import {
   convertToFirestoreFields,
   convertFromFirestoreFields,
   resolveCycleRecordedAt,
+  getCycleReportWriteDecision,
   computePinPbkdf2,
   computeStoredPinHash,
 } from '../worker/worker.js';
@@ -576,6 +577,42 @@ export async function runAllTests() {
   assert(
     resolveCycleRecordedAt('2026-11-04T18:30:00.000Z', cycleServerNow) === '2026-11-04T18:30:00.000Z',
     'الاحتفاظ بوقت التسجيل الأصلي عند مزامنة تقرير محفوظ دون اتصال'
+  );
+  const latestCycle = {
+    workerId: 'worker_123',
+    count: 1800,
+    photo: 'data:image/jpeg;base64,QUJD',
+    recordedAt: '2026-11-04T19:00:00.000Z',
+  };
+  assert(
+    getCycleReportWriteDecision(latestCycle, {
+      workerId: 'worker_123', count: 1800, photo: 'data:image/jpeg;base64,QUJD',
+      recordedAt: '2026-11-04T19:00:00.000Z',
+    }) === 'duplicate',
+    'اعتبار إعادة إرسال التقرير نفسه بالوقت والبيانات نفسيهما عملية مكررة آمنة'
+  );
+  let staleCycleRejected = false;
+  try {
+    getCycleReportWriteDecision(latestCycle, {
+      workerId: 'worker_123', count: 900, photo: 'data:image/jpeg;base64,REVG',
+      recordedAt: '2026-11-04T18:00:00.000Z',
+    });
+  } catch (err: any) { staleCycleRejected = err.code === 'stale_cycle_report' && err.status === 409; }
+  assert(staleCycleRejected, 'رفض تقرير قديم يصل بعد تقرير أحدث أثناء المزامنة');
+  let conflictingCycleRejected = false;
+  try {
+    getCycleReportWriteDecision(latestCycle, {
+      workerId: 'worker_123', count: 2000, photo: 'data:image/jpeg;base64,SElK',
+      recordedAt: '2026-11-04T19:00:00.000Z',
+    });
+  } catch (err: any) { conflictingCycleRejected = err.code === 'cycle_report_timestamp_conflict' && err.status === 409; }
+  assert(conflictingCycleRejected, 'رفض تقرير مختلف يحمل وقت التسجيل نفسه بدل استبدال البيانات');
+  assert(
+    getCycleReportWriteDecision(latestCycle, {
+      workerId: 'worker_123', count: 1900, photo: 'data:image/jpeg;base64,S0xN',
+      recordedAt: '2026-11-04T19:30:00.000Z',
+    }) === 'write',
+    'السماح بتحديث التقرير عندما يكون وقت التسجيل أحدث فعلاً'
   );
   assert(
     resolveCycleRecordedAt(undefined, cycleServerNow) === cycleServerNow.toISOString(),
