@@ -1,3 +1,4 @@
+import { enqueueOfflineMutation, readOfflineMutations, removeOfflineMutation } from '../utils/offlineMutationQueue';
 import { auth } from './firebase';
 import type { OperationsResponse, ProgressPayload, TaskPayload, TaskRecord, WorkerPayload, WorkerRecord, ChatMessage, MachineCycleRecord, ManagementAccountRecord, ContactRecord } from '../types/operations';
 
@@ -49,11 +50,32 @@ export const listMyMachineCycles = (pageToken?: string | null) => {
 };
 export const submitMachineCycle = (count: number, photo: string, recordedAt: string) => request<OperationsResponse<MachineCycleRecord>>('/api/worker/cycles', { method: 'POST', body: JSON.stringify({ count, photo, recordedAt }) });
 
-type QueuedMutation = { id: string; path: string; init: RequestInit; createdAt: string };
-export function queueMutation(path: string, init: RequestInit) { if (!auth.currentUser) throw new Error('لا يمكن حفظ عملية دون اتصال قبل تسجيل الدخول.'); const queue = readQueue(); queue.push({ id: crypto.randomUUID(), path, init, createdAt: new Date().toISOString() }); localStorage.setItem(currentQueueKey(), JSON.stringify(queue)); }
-function readQueue(): QueuedMutation[] { try { return JSON.parse(localStorage.getItem(currentQueueKey()) || '[]'); } catch { return []; } }
+function currentQueueItemPrefix() { return `${currentQueueKey()}:item:`; }
+export function queueMutation(path: string, init: RequestInit) {
+  if (!auth.currentUser) throw new Error('لا يمكن حفظ عملية دون اتصال قبل تسجيل الدخول.');
+  enqueueOfflineMutation(localStorage, currentQueueKey(), currentQueueItemPrefix(), {
+    id: crypto.randomUUID(), path, init, createdAt: new Date().toISOString()
+  });
+}
+function readQueue() { return readOfflineMutations(localStorage, currentQueueKey(), currentQueueItemPrefix()); }
 export function queuedMutationCount() { return readQueue().length; }
-export async function flushQueuedMutations() { const queue = readQueue(); if (!queue.length || !navigator.onLine) return 0; let flushed = 0; for (const item of queue) { try { await request(item.path, item.init); flushed++; } catch { break; } } if (flushed) localStorage.setItem(currentQueueKey(), JSON.stringify(queue.slice(flushed))); return flushed; }
+export async function flushQueuedMutations() {
+  const legacyKey = currentQueueKey();
+  const itemPrefix = currentQueueItemPrefix();
+  const queue = readOfflineMutations(localStorage, legacyKey, itemPrefix);
+  if (!queue.length || !navigator.onLine) return 0;
+  let flushed = 0;
+  for (const item of queue) {
+    try {
+      await request(item.path, item.init);
+      removeOfflineMutation(localStorage, itemPrefix, item.id);
+      flushed++;
+    } catch {
+      break;
+    }
+  }
+  return flushed;
+}
 
 export async function managementLogin(name: string, code: string, role: 'admin' | 'responsible'): Promise<{ customToken: string; user: { uid: string; displayName: string; role: string } }> {
   const response = await fetch(`${BASE}/api/management-auth/login`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name, code, role }) });
