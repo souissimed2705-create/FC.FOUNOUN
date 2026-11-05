@@ -1553,8 +1553,8 @@ async function handleWorkerTaskStatus(request, taskId, workerId, projectId, acce
   }]);
   if (task.createdBy && task.createdBy !== workerId) {
     const worker = convertFromFirestoreFields(workerDoc.fields || {});
-    const statusLabel = payload.status === 'pending' ? 'علّق' : 'استأنف';
-    await createUserNotification(task.createdBy, 'task_status', 'تحديث حالة أمر الإنتاج', `قام ${worker.name || 'العامل'} بــ${statusLabel} المهمة ${task.title || ''}.`, taskId, projectId, accessToken);
+    const statusLabel = payload.status === 'pending' ? 'بتعليق' : 'باستئناف';
+    await createUserNotification(task.createdBy, 'task_status', 'تحديث حالة أمر الإنتاج', `قام ${worker.name || 'العامل'} ${statusLabel} المهمة ${task.title || ''}.`, taskId, projectId, accessToken);
   }
   return jsonResponse({ success: true, task: sanitizeResourceOutput(record, 'tasks') }, 200, corsHeaders);
 }
