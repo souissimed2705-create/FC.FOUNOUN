@@ -48,6 +48,7 @@ import {
   convertToFirestoreFields,
   convertFromFirestoreFields,
   resolveCycleRecordedAt,
+  buildLoginAttemptRecord,
   computePinPbkdf2,
   computeStoredPinHash,
 } from '../worker/worker.js';
@@ -593,6 +594,25 @@ export async function runAllTests() {
 
   console.log('\n====================================================');
   console.log(`إجمالي الاختبارات: ${passed + failed} | نجح: ${passed} | فشل: ${failed}`);
+  console.log('\\n11. اختبارات عداد محاولات الدخول المتزامنة:');
+  const loginNow = Date.parse('2026-11-05T08:00:00.000Z');
+  let attemptsRecord: any = {};
+  for (let i = 1; i <= 4; i++) {
+    attemptsRecord = buildLoginAttemptRecord('workerId', 'wkr_login_test', attemptsRecord, loginNow + i * 1000, false);
+    assert(attemptsRecord.count === i && attemptsRecord.lockedUntil === 0,
+      `احتساب محاولة الدخول الفاشلة رقم ${i} دون فقدان العداد`);
+  }
+  attemptsRecord = buildLoginAttemptRecord('workerId', 'wkr_login_test', attemptsRecord, loginNow + 5000, false);
+  assert(attemptsRecord.count === 0 && attemptsRecord.lockedUntil === loginNow + 5 * 1000 + 15 * 60 * 1000,
+    'قفل الحساب لمدة 15 دقيقة بعد خمس محاولات فاشلة');
+  let lockedLoginRejected = false;
+  try { buildLoginAttemptRecord('workerId', 'wkr_login_test', attemptsRecord, loginNow + 6000, false); }
+  catch (err: any) { lockedLoginRejected = err.status === 429 && err.code === 'login_locked'; }
+  assert(lockedLoginRejected, 'رفض المحاولات أثناء فترة القفل');
+  const resetLoginAttempts = buildLoginAttemptRecord('uid', 'mgr_login_test', attemptsRecord, loginNow + 16 * 60 * 1000, true);
+  assert(resetLoginAttempts.count === 0 && resetLoginAttempts.lockedUntil === 0 && resetLoginAttempts.uid === 'mgr_login_test',
+    'إعادة تصفير عداد المحاولات بعد دخول صحيح وانتهاء القفل');
+
   console.log('====================================================\n');
 
   if (failed > 0) {
