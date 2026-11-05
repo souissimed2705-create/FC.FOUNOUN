@@ -128,7 +128,7 @@ export default function App() {
             </div>
             <div className="flex flex-col">
               <span className="font-['Cinzel'] tracking-widest text-xs font-bold text-white">
-                FC.FOUNOUN
+                FONOUN CHAUSSURES
               </span>
               <span className="text-[10px] text-gray-400 font-['Cairo'] -mt-0.5">
                 فنون للأحذية الفاخرة
@@ -171,7 +171,7 @@ export default function App() {
 
               {/* Main Text Logo */}
               <h1 className="font-['Cinzel'] text-2xl sm:text-3xl font-bold tracking-[0.2em] text-white">
-                FC.FOUNOUN
+                FONOUN CHAUSSURES
               </h1>
 
               {/* Brand Sub-title */}
@@ -204,7 +204,7 @@ export default function App() {
       <footer className="relative z-10 w-full border-t border-white/5 bg-[#070707] py-4 px-4 safe-pb text-center text-xs text-gray-500">
         <div className="max-w-4xl mx-auto flex flex-col sm:flex-row items-center justify-between gap-2 text-[11px]">
           <p className="text-gray-400">
-            جميع الحقوق محفوظة © {new Date().getFullYear()} FC.FOUNOUN
+            جميع الحقوق محفوظة © {new Date().getFullYear()} FONOUN CHAUSSURES
           </p>
           <div className="flex items-center gap-1.5 text-[#D4AF37]/80">
             <Sparkles className="w-3 h-3" />
