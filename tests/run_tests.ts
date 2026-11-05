@@ -10,6 +10,7 @@
  */
 
 import { normalizeModelName } from '../src/utils/modelNormalization';
+import { getMissingFirebaseConfigFields } from '../src/utils/firebaseConfigValidation';
 import {
   validateDualImageLimits,
   MAX_IMAGE_CHARS,
@@ -80,6 +81,30 @@ export async function runAllTests() {
       assert(err.status === expectedStatus && err.code === expectedCode, testName, 'رمز الرفض أو الحالة غير صحيح');
     }
   }
+
+  // Firebase Web client configuration validation
+  console.log('0. اختبارات التحقق من إعدادات Firebase Web:');
+  const validFirebaseConfig = {
+    apiKey: 'AIzaSyDUMMY_TEST_KEY_123456789012345678',
+    messagingSenderId: '123456789012',
+    appId: '1:123456789012:web:abcdef0123456789',
+  };
+  assert(
+    getMissingFirebaseConfigFields(validFirebaseConfig).length === 0,
+    'قبول إعدادات Firebase Web الصحيحة'
+  );
+  assert(
+    getMissingFirebaseConfigFields({ ...validFirebaseConfig, messagingSenderId: 'abc123' }).includes('VITE_FIREBASE_MESSAGING_SENDER_ID'),
+    'رفض معرّف مرسل Firebase غير الرقمي'
+  );
+  assert(
+    getMissingFirebaseConfigFields({ ...validFirebaseConfig, appId: '1:abc:web:XYZ' }).includes('VITE_FIREBASE_APP_ID'),
+    'رفض معرّف تطبيق Firebase غير المطابق'
+  );
+  assert(
+    getMissingFirebaseConfigFields({ ...validFirebaseConfig, apiKey: 'invalid' }).includes('VITE_FIREBASE_API_KEY'),
+    'رفض مفتاح Firebase غير الصالح'
+  );
 
   // 1. Test Name Normalization (casing and whitespace only, preserving Tashkeel & Tatweel)
   console.log('1. اختبارات توحيد الأسماء وحساب SHA-256 (من src/utils/modelNormalization.ts):');
