@@ -10,6 +10,7 @@
  */
 
 import { normalizeModelName } from '../src/utils/modelNormalization';
+import { normalizeMutationInit } from '../src/utils/offlineQueue';
 import {
   validateDualImageLimits,
   MAX_IMAGE_CHARS,
@@ -56,6 +57,21 @@ export async function runAllTests() {
   console.log('====================================================');
   console.log('FC.FOUNOUN – وتشغيل حزمة الاختبارات التقنية المؤكدة');
   console.log('(يتم استيراد الدوال الفعلية مباشرة من ملفات المشروع)');
+  console.log('\\n12. اختبارات تجهيز عمليات المزامنة للتخزين المحلي:');
+  const normalizedQueueInit = normalizeMutationInit({
+    method: 'POST',
+    body: JSON.stringify({ count: 25, photo: 'data:image/webp;base64,AAAA' }),
+    headers: { 'X-Request-Source': 'offline-queue' }
+  });
+  assert(normalizedQueueInit.method === 'POST' &&
+    normalizedQueueInit.body?.includes('"count":25') === true &&
+    normalizedQueueInit.headers?.['X-Request-Source'] === 'offline-queue',
+    'حفظ طريقة الطلب والحمولة والرؤوس في سجل قابل للاسترجاع من IndexedDB');
+  let unsupportedQueueBodyRejected = false;
+  try { normalizeMutationInit({ method: 'POST', body: { binary: true } as unknown as BodyInit }); }
+  catch { unsupportedQueueBodyRejected = true; }
+  assert(unsupportedQueueBodyRejected, 'رفض حمولة غير نصية حتى لا تتحول العملية المحفوظة إلى بيانات تالفة');
+
   console.log('====================================================\n');
 
   let passed = 0;
