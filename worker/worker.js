@@ -427,7 +427,7 @@ async function handleCreateResource(request, resource, callerUid, projectId, acc
         if (!existingPin) {
           const salt = bytesToBase64Url(crypto.getRandomValues(new Uint8Array(16)));
           const pinHash = await computePinPbkdf2(salt, workerPin);
-          const pinRecord = { workerId: id, pin_hash: pinHash, pin_salt: salt, pin_algo: 'pbkdf2-sha256-v1', updatedBy: callerUid, updatedAt: new Date().toISOString() };
+          const pinRecord = { workerId: id, pin_hash: pinHash, pin_salt: salt, pin_algo: 'pbkdf2-sha256-v2', pin_iterations: 100000, updatedBy: callerUid, updatedAt: new Date().toISOString() };
           await commitFirestoreTransaction(projectId, accessToken, null, [{ update: { name: `projects/${projectId}/databases/(default)/documents/worker_pins/${id}`, fields: convertToFirestoreFields(pinRecord) }, currentDocument: { exists: false } }]);
         }
       }
@@ -470,7 +470,7 @@ async function handleCreateResource(request, resource, callerUid, projectId, acc
   if (resource === 'workers' && callerRole === 'super_admin' && workerPin) {
     const salt = bytesToBase64Url(crypto.getRandomValues(new Uint8Array(16)));
     const pinHash = await computePinPbkdf2(salt, workerPin);
-    const pinRecord = { workerId: id, pin_hash: pinHash, pin_salt: salt, pin_algo: 'pbkdf2-sha256-v1', updatedBy: callerUid, updatedAt: now };
+    const pinRecord = { workerId: id, pin_hash: pinHash, pin_salt: salt, pin_algo: 'pbkdf2-sha256-v2', pin_iterations: 100000, updatedBy: callerUid, updatedAt: now };
     writes.push({
       update: { name: `projects/${projectId}/databases/(default)/documents/worker_pins/${id}`, fields: convertToFirestoreFields(pinRecord) },
       currentDocument: { exists: false }
@@ -838,7 +838,7 @@ async function handleCreateManagementAccount(request, callerUid, projectId, acce
   const user = { uid, displayName: name, name, email: '', role, status: 'active', ...(role === 'responsible' ? { shift } : {}), createdBy: callerUid, createdAt: now, updatedAt: now };
   const salt = bytesToBase64Url(crypto.getRandomValues(new Uint8Array(16)));
   const pinHash = await computePinPbkdf2(salt, code);
-  const codeRecord = { uid, pin_hash: pinHash, pin_salt: salt, pin_algo: 'pbkdf2-sha256-v1', updatedBy: callerUid, updatedAt: now };
+  const codeRecord = { uid, pin_hash: pinHash, pin_salt: salt, pin_algo: 'pbkdf2-sha256-v2', pin_iterations: 100000, updatedBy: callerUid, updatedAt: now };
   await commitFirestoreTransaction(projectId, accessToken, null, [
     { update: { name: `projects/${projectId}/databases/(default)/documents/users/${uid}`, fields: convertToFirestoreFields(user) }, currentDocument: { exists: false } },
     { update: { name: `projects/${projectId}/databases/(default)/documents/management_codes/${uid}`, fields: convertToFirestoreFields(codeRecord) }, currentDocument: { exists: false } },
@@ -858,7 +858,7 @@ async function handleSetManagementCode(request, uid, callerUid, projectId, acces
   const pinHash = await computePinPbkdf2(salt, payload.code);
   const path = `management_codes/${uid}`;
   const old = await getFirestoreDoc(projectId, accessToken, path);
-  const record = { uid, pin_hash: pinHash, pin_salt: salt, pin_algo: 'pbkdf2-sha256-v1', updatedBy: callerUid, updatedAt: new Date().toISOString() };
+  const record = { uid, pin_hash: pinHash, pin_salt: salt, pin_algo: 'pbkdf2-sha256-v2', pin_iterations: 100000, updatedBy: callerUid, updatedAt: new Date().toISOString() };
   const write = { update: { name: `projects/${projectId}/databases/(default)/documents/${path}`, fields: convertToFirestoreFields(record) } };
   write.currentDocument = old?.updateTime ? { updateTime: old.updateTime } : { exists: false };
   await commitFirestoreTransaction(projectId, accessToken, null, [write]);
@@ -955,9 +955,7 @@ async function handleManagementLogin(request, env, projectId, accessToken, corsH
   const attempts = attemptsDoc ? convertFromFirestoreFields(attemptsDoc.fields || {}) : {};
   const now = Date.now();
   if (Number(attempts.lockedUntil || 0) > now) throw createHttpError('تم إيقاف محاولة الدخول مؤقتاً. حاول بعد 15 دقيقة.', 429, 'management_login_locked');
-  const suppliedHash = codeRecord.pin_algo === 'pbkdf2-sha256-v1'
-    ? await computePinPbkdf2(codeRecord.pin_salt, code)
-    : await computeWebCryptoSha256(`${codeRecord.pin_salt}:${code}`);
+  const suppliedHash = await computeStoredPinHash(codeRecord, code, 'رمز حساب المسؤول');
   if (suppliedHash !== codeRecord.pin_hash) {
     const count = Number(attempts.count || 0) + 1;
     const lockedUntil = count >= 5 ? now + 15 * 60 * 1000 : 0;
@@ -1003,9 +1001,7 @@ async function handleWorkerLogin(request, env, projectId, accessToken, corsHeade
     throw createHttpError('تم إيقاف محاولة الدخول مؤقتاً. حاول بعد 15 دقيقة.', 429, 'worker_login_locked');
   }
 
-  const suppliedHash = pinRecord.pin_algo === 'pbkdf2-sha256-v1'
-    ? await computePinPbkdf2(pinRecord.pin_salt, pin)
-    : await computeWebCryptoSha256(`${pinRecord.pin_salt}:${pin}`);
+  const suppliedHash = await computeStoredPinHash(pinRecord, pin, 'رمز مشرف العمال');
   if (suppliedHash !== pinRecord.pin_hash) {
     const count = Number(attempts.count || 0) + 1;
     const lockedUntil = count >= 5 ? now + 15 * 60 * 1000 : 0;
@@ -1415,7 +1411,7 @@ async function handleSetWorkerPin(request, workerId, callerUid, projectId, acces
   if (!worker) throw createHttpError('العامل المطلوب غير موجود', 404, 'worker_not_found');
   const salt = bytesToBase64Url(crypto.getRandomValues(new Uint8Array(16)));
   const pinHash = await computePinPbkdf2(salt, payload.pin);
-  const pinRecord = { workerId, pin_hash: pinHash, pin_salt: salt, pin_algo: 'pbkdf2-sha256-v1', updatedBy: callerUid, updatedAt: new Date().toISOString() };
+  const pinRecord = { workerId, pin_hash: pinHash, pin_salt: salt, pin_algo: 'pbkdf2-sha256-v2', pin_iterations: 100000, updatedBy: callerUid, updatedAt: new Date().toISOString() };
   const pinPath = `worker_pins/${workerId}`;
   const existingPinDoc = await getFirestoreDoc(projectId, accessToken, pinPath);
   const pinWrite = {
@@ -1931,14 +1927,30 @@ export async function normalizeModelName(rawName) {
   return { original, normalized: canonical, hash };
 }
 
-async function computePinPbkdf2(salt, pin) {
+const PIN_PBKDF2_ITERATIONS = 100000;
+
+export async function computePinPbkdf2(salt, pin) {
   const material = await crypto.subtle.importKey('raw', new TextEncoder().encode(pin), 'PBKDF2', false, ['deriveBits']);
   const bits = await crypto.subtle.deriveBits(
-    { name: 'PBKDF2', salt: new TextEncoder().encode(salt), iterations: 120000, hash: 'SHA-256' },
+    { name: 'PBKDF2', salt: new TextEncoder().encode(salt), iterations: PIN_PBKDF2_ITERATIONS, hash: 'SHA-256' },
     material,
     256
   );
   return Array.from(new Uint8Array(bits)).map(byte => byte.toString(16).padStart(2, '0')).join('');
+}
+
+export async function computeStoredPinHash(record, pin, label) {
+  if (record?.pin_algo === 'pbkdf2-sha256-v1') {
+    throw createHttpError(`تم تحديث حماية رموز الدخول. يلزم إعادة تعيين ${label} من حساب المشرف العام قبل تسجيل الدخول.`, 409, 'pin_reset_required');
+  }
+  if (record?.pin_algo === 'pbkdf2-sha256-v2') {
+    const iterations = Number(record.pin_iterations || PIN_PBKDF2_ITERATIONS);
+    if (!Number.isInteger(iterations) || iterations !== PIN_PBKDF2_ITERATIONS) {
+      throw createHttpError('إعداد حماية رمز الدخول غير صالح؛ يلزم إعادة تعيين الرمز من المشرف العام.', 409, 'pin_reset_required');
+    }
+    return computePinPbkdf2(record.pin_salt, pin);
+  }
+  return computeWebCryptoSha256(`${record.pin_salt}:${pin}`);
 }
 
 export async function computeWebCryptoSha256(str) {
@@ -2580,10 +2592,21 @@ async function listFirestoreDocs(projectId, accessToken, collection, pageSize, p
   const resp = await fetch(url, {
     headers: { Authorization: `Bearer ${accessToken}` },
   });
+  const responseText = await resp.text();
+  let data = null;
+  try { data = responseText ? JSON.parse(responseText) : null; } catch { /* Keep provider response details out of the client response. */ }
   if (!resp.ok) {
-    throw createHttpError('فشل قراءة قائمة الموديلات من Firestore', 500, 'collection_read_failed');
+    const providerCode = data?.error?.status || 'UNKNOWN';
+    const providerMessage = String(data?.error?.message || responseText || 'No provider details').slice(0, 500);
+    console.error('[Firestore collection read failed]', { collection, httpStatus: resp.status, providerCode, providerMessage });
+    const isPermissionError = resp.status === 401 || resp.status === 403;
+    throw createHttpError(
+      `فشل قراءة قائمة الموديلات من Firestore (HTTP ${resp.status} - ${providerCode})`,
+      isPermissionError ? 403 : 500,
+      `collection_read_failed_${providerCode.toLowerCase()}`
+    );
   }
-  const data = await resp.json();
+  if (!data) throw createHttpError('استجابة Firestore غير صالحة عند قراءة قائمة الموديلات', 502, 'invalid_firestore_response');
   return {
     documents: Array.isArray(data.documents) ? data.documents : [],
     nextPageToken: data.nextPageToken || null,
