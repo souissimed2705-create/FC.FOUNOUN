@@ -89,7 +89,7 @@ export const OperationsPanel: React.FC<Props> = ({ initialSection, admin }) => {
         setWorkers(cachedWorkers);
         setWorkerEdits(current => Object.fromEntries(cachedWorkers.map(worker => [worker.id, current[worker.id] || { name: worker.name, phone: worker.phone || '', machineNumber: String(worker.machineNumber || ''), shift: worker.shift || 'day' }])));
       } else {
-        loadErrors.push(workersResult.reason instanceof Error ? workersResult.reason.message : 'تعذر تحميل قائمة العمال.');
+        loadErrors.push(`قراءة قائمة العمال: ${workersResult.reason instanceof Error ? workersResult.reason.message : 'تعذر تحميل قائمة العمال.'}`);
       }
     }
 
@@ -100,7 +100,7 @@ export const OperationsPanel: React.FC<Props> = ({ initialSection, admin }) => {
     } else {
       const cachedTasks = await readOfflineSnapshot<TaskRecord[]>(`management-tasks:${admin.uid}`).catch(() => null);
       if (cachedTasks) setTasks(isResponsible ? [] : cachedTasks);
-      else loadErrors.push(tasksResult.reason instanceof Error ? tasksResult.reason.message : 'تعذر تحميل أوامر الإنتاج.');
+      else loadErrors.push(`قراءة أوامر الإنتاج: ${tasksResult.reason instanceof Error ? tasksResult.reason.message : 'تعذر تحميل أوامر الإنتاج.'}`);
     }
 
     if (modelsResult.status === 'fulfilled') {
@@ -122,7 +122,7 @@ export const OperationsPanel: React.FC<Props> = ({ initialSection, admin }) => {
     } else {
       const cachedCycles = await readOfflineSnapshot<MachineCycleRecord[]>(`management-cycles:${admin.uid}`).catch(() => null);
       if (cachedCycles) setCycles(cachedCycles);
-      else loadErrors.push(cyclesResult.reason instanceof Error ? cyclesResult.reason.message : 'تعذر تحميل تقارير دورات المكائن.');
+      else loadErrors.push(`قراءة تقارير دورات المكائن: ${cyclesResult.reason instanceof Error ? cyclesResult.reason.message : 'تعذر تحميل تقارير دورات المكائن.'}`);
     }
 
     setError(loadErrors.length ? loadErrors.join(' · ') : null);
