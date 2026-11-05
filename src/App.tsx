@@ -6,13 +6,18 @@
 import React, { useState, useEffect } from 'react';
 import { AdminLoginForm } from './components/AdminLoginForm';
 import { AdminDashboard } from './components/AdminDashboard';
+import { WorkerLogin } from './components/WorkerLogin';
+import { NamedCodeLogin } from './components/NamedCodeLogin';
+import { WorkerDashboard } from './components/WorkerDashboard';
 import { PWAInstallBadge } from './components/PWAInstallBadge';
 import { useOnlineStatus } from './hooks/useOnlineStatus';
 import { WifiOff, Sparkles, Crown } from 'lucide-react';
 import { onAuthStateChanged, signOut } from 'firebase/auth';
 import {
   auth,
-  verifySuperAdmin,
+  isFirebaseConfigured,
+  getFirebaseConfigurationError,
+  verifyAdmin,
   UserProfile,
   mapAuthorizationErrorToArabic,
 } from './lib/firebase';
@@ -20,31 +25,44 @@ import {
 export default function App() {
   const isOnline = useOnlineStatus();
   const [verifiedAdmin, setVerifiedAdmin] = useState<UserProfile | null>(null);
+  const [verifiedWorker, setVerifiedWorker] = useState<{ id: string; name: string } | null>(null);
+  const [loginMode, setLoginMode] = useState<'super_admin' | 'admin' | 'responsible' | 'worker'>('super_admin');
   const [isCheckingInitialAuth, setIsCheckingInitialAuth] = useState(true);
   const [sessionError, setSessionError] = useState<string | null>(null);
   const [isLoggingOut, setIsLoggingOut] = useState(false);
 
   // Synchronize and verify current active session against Firestore RBAC
   useEffect(() => {
+    if (!isFirebaseConfigured()) {
+      setSessionError(getFirebaseConfigurationError());
+      setIsCheckingInitialAuth(false);
+      return;
+    }
+
     const unsubscribe = onAuthStateChanged(auth, async (user) => {
       if (user) {
         try {
-          // Verify role and status in users/{uid}
-          const profile = await verifySuperAdmin(user.uid);
-          setVerifiedAdmin(profile);
-          setSessionError(null);
+          const tokenResult = await user.getIdTokenResult();
+          if (tokenResult.claims.role === 'worker' && tokenResult.claims.workerId === user.uid) {
+            setVerifiedWorker({ id: user.uid, name: String(tokenResult.claims.workerName || 'العامل') });
+            setVerifiedAdmin(null);
+            setSessionError(null);
+          } else {
+            const profile = await verifyAdmin(user.uid);
+            setVerifiedAdmin(profile);
+            setVerifiedWorker(null);
+            setSessionError(null);
+          }
         } catch (err: unknown) {
-          // If doc missing, wrong role, or inactive -> immediately signOut
           await signOut(auth);
           setVerifiedAdmin(null);
-
+          setVerifiedWorker(null);
           const errorObj = err as { message?: string; code?: string };
-          setSessionError(
-            mapAuthorizationErrorToArabic(errorObj?.message || errorObj?.code || '')
-          );
+          setSessionError(mapAuthorizationErrorToArabic(errorObj?.message || errorObj?.code || ''));
         }
       } else {
         setVerifiedAdmin(null);
+        setVerifiedWorker(null);
       }
       setIsCheckingInitialAuth(false);
     });
@@ -57,6 +75,7 @@ export default function App() {
     try {
       await signOut(auth);
       setVerifiedAdmin(null);
+      setVerifiedWorker(null);
       setSessionError(null);
     } catch (err) {
       console.error('Logout error:', err);
@@ -64,6 +83,22 @@ export default function App() {
       setIsLoggingOut(false);
     }
   };
+
+  if (!isFirebaseConfigured()) {
+    return (
+      <div dir="rtl" className="min-h-screen bg-[#080808] text-white flex items-center justify-center p-6">
+        <main className="w-full max-w-xl rounded-2xl border border-[#D4AF37]/40 bg-[#111] p-6 text-center shadow-2xl">
+          <h1 className="mb-3 text-xl font-bold text-[#F5D77F]">يلزم ضبط اتصال Firebase</h1>
+          <p className="text-sm leading-7 text-gray-300">
+            {sessionError || 'إعداد Firebase غير مكتمل. يرجى ضبط متغيرات VITE_FIREBASE_* ثم إعادة بناء التطبيق.'}
+          </p>
+          <p className="mt-4 text-xs leading-6 text-gray-500">
+            استخدم إعداد Web الرسمي من مشروع fc-founoun في Firebase Console، ولا تضع مفاتيح Service Account في التطبيق.
+          </p>
+        </main>
+      </div>
+    );
+  }
 
   return (
     <div className="min-h-screen bg-[#080808] text-white flex flex-col justify-between relative selection:bg-[#D4AF37]/30 selection:text-[#F3E5AB]">
@@ -93,7 +128,7 @@ export default function App() {
             </div>
             <div className="flex flex-col">
               <span className="font-['Cinzel'] tracking-widest text-xs font-bold text-white">
-                FC.FOUNOUN
+                FONOUN CHAUSSURES
               </span>
               <span className="text-[10px] text-gray-400 font-['Cairo'] -mt-0.5">
                 فنون للأحذية الفاخرة
@@ -119,14 +154,10 @@ export default function App() {
             </span>
           </div>
         ) : verifiedAdmin ? (
-          // Authorized Admin Dashboard
-          <AdminDashboard
-            admin={verifiedAdmin}
-            onLogout={handleLogout}
-            isLoggingOut={isLoggingOut}
-          />
+          <AdminDashboard admin={verifiedAdmin} onLogout={handleLogout} isLoggingOut={isLoggingOut} />
+        ) : verifiedWorker ? (
+          <WorkerDashboard worker={verifiedWorker} />
         ) : (
-          // Admin Login Form
           <div className="w-full max-w-md mx-auto flex flex-col items-center">
             {/* Brand Logo & Presentation */}
             <div className="text-center mb-6 sm:mb-8 select-none">
@@ -140,7 +171,7 @@ export default function App() {
 
               {/* Main Text Logo */}
               <h1 className="font-['Cinzel'] text-2xl sm:text-3xl font-bold tracking-[0.2em] text-white">
-                FC.FOUNOUN
+                FONOUN CHAUSSURES
               </h1>
 
               {/* Brand Sub-title */}
@@ -151,14 +182,20 @@ export default function App() {
                 </p>
                 <span className="h-px w-6 bg-gradient-to-l from-transparent to-[#D4AF37]/50"></span>
               </div>
+              <p className="mt-3 max-w-sm text-xs leading-6 text-gray-400">للبحث عن الموديلات وتنظيم أوامر الإنتاج ومتابعة إنجاز العمل.</p>
             </div>
 
-            {/* Admin Login Form Component */}
-            <AdminLoginForm
-              onSuccess={(admin) => setVerifiedAdmin(admin)}
-              externalError={sessionError}
-              onClearExternalError={() => setSessionError(null)}
-            />
+            <div className="mb-3 grid w-full grid-cols-2 gap-2 rounded-xl border border-white/10 bg-[#111] p-1">
+              <button className={`tab-button ${loginMode === 'super_admin' ? 'tab-active' : ''}`} onClick={() => setLoginMode('super_admin')}>المشرف العام</button>
+              <button className={`tab-button ${loginMode === 'admin' ? 'tab-active' : ''}`} onClick={() => setLoginMode('admin')}>المدير العام</button>
+              <button className={`tab-button ${loginMode === 'responsible' ? 'tab-active' : ''}`} onClick={() => setLoginMode('responsible')}>المسؤول</button>
+              <button className={`tab-button ${loginMode === 'worker' ? 'tab-active' : ''}`} onClick={() => setLoginMode('worker')}>مشرف العمال</button>
+            </div>
+            {loginMode === 'super_admin' ? (
+              <AdminLoginForm onSuccess={(admin) => setVerifiedAdmin(admin)} externalError={sessionError} onClearExternalError={() => setSessionError(null)} />
+            ) : loginMode === 'admin' ? <NamedCodeLogin role="admin" title="دخول المدير العام" />
+            : loginMode === 'responsible' ? <NamedCodeLogin role="responsible" title="دخول المسؤول" />
+            : <WorkerLogin />}
           </div>
         )}
       </main>
@@ -167,7 +204,7 @@ export default function App() {
       <footer className="relative z-10 w-full border-t border-white/5 bg-[#070707] py-4 px-4 safe-pb text-center text-xs text-gray-500">
         <div className="max-w-4xl mx-auto flex flex-col sm:flex-row items-center justify-between gap-2 text-[11px]">
           <p className="text-gray-400">
-            جميع الحقوق محفوظة © {new Date().getFullYear()} FC.FOUNOUN
+            جميع الحقوق محفوظة © {new Date().getFullYear()} FONOUN CHAUSSURES
           </p>
           <div className="flex items-center gap-1.5 text-[#D4AF37]/80">
             <Sparkles className="w-3 h-3" />

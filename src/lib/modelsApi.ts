@@ -6,14 +6,15 @@
  * (Create, Update, Delete) with Firebase ID Token authentication and RBAC.
  */
 
-import { auth } from './lib/firebase';
+import { auth } from './firebase';
 import type {
   CreateModelPayload,
   UpdateModelPayload,
   CreateModelResponse,
   UpdateModelResponse,
   DeleteModelResponse,
-} from './types/models';
+  ListModelsResponse,
+} from '../types/models';
 
 const WORKER_BASE_URL =
   (import.meta.env.VITE_WORKER_URL as string | undefined)?.replace(/\/$/, '') ||
@@ -29,6 +30,30 @@ export class ApiError extends Error {
     this.status = status;
     this.code = code;
   }
+}
+
+export async function listShoeModels(options: {
+  search?: string;
+  category?: CreateModelPayload['category'];
+  pageSize?: number;
+  pageToken?: string | null;
+} = {}): Promise<ListModelsResponse> {
+  const token = await getAuthToken();
+  const params = new URLSearchParams();
+  if (options.search?.trim()) params.set('q', options.search.trim());
+  if (options.category) params.set('category', options.category);
+  if (options.pageSize) params.set('pageSize', String(options.pageSize));
+  if (options.pageToken) params.set('pageToken', options.pageToken);
+  const query = params.toString();
+  const response = await fetch(`${WORKER_BASE_URL}/api/models${query ? `?${query}` : ''}`, {
+    headers: { Authorization: `Bearer ${token}` },
+  });
+  const responseData = await response.json().catch(() => null);
+  if (!response.ok || !responseData?.success) {
+    const finalMsg = mapStatusToMessage(response.status, responseData?.error || responseData?.message);
+    throw new ApiError(finalMsg, response.status, responseData?.code);
+  }
+  return responseData as ListModelsResponse;
 }
 
 /**

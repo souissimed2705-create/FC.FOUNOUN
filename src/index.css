@@ -61,3 +61,13 @@
 .safe-pt {
   padding-top: max(1rem, env(safe-area-inset-top));
 }
+
+@layer components {
+  .field { @apply rounded-xl border border-white/10 bg-[#0A0A0A] px-3 py-3 text-sm text-white outline-none transition focus:border-[#D4AF37] focus:ring-2 focus:ring-[#D4AF37]/20; }
+  .gold-button { @apply inline-flex items-center justify-center gap-2 rounded-xl bg-[#D4AF37] px-4 py-3 text-sm font-bold text-black transition hover:bg-[#F5D77F] disabled:opacity-50; }
+  .secondary-button { @apply inline-flex items-center justify-center gap-2 rounded-xl border border-white/15 bg-[#181818] px-3 py-2 text-xs font-semibold text-gray-200 transition hover:border-[#D4AF37]/60 hover:text-[#F5D77F]; }
+  .danger-button { @apply inline-flex items-center justify-center gap-2 rounded-xl border border-red-500/40 bg-[#261515] px-3 py-2 text-xs font-semibold text-red-200 transition hover:bg-[#381B1B] disabled:opacity-50; }
+  .tab-button { @apply inline-flex items-center justify-center gap-2 rounded-xl px-2 py-3 text-xs font-semibold text-gray-400 transition hover:bg-white/5 hover:text-white; }
+  .tab-active { @apply bg-[#2A2312] text-[#F5D77F] ring-1 ring-[#D4AF37]/40; }
+  .stat { @apply flex items-center gap-2 rounded-lg border border-white/5 bg-black/30 px-3 py-2 text-gray-200; }
+}

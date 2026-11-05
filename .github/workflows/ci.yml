@@ -1,0 +1,46 @@
+name: CI
+
+on:
+  pull_request:
+    branches:
+      - fix/full-project-repair
+      - fix/operations-contracts-rbac
+      - main
+  push:
+    branches:
+      - fix/operations-contracts
+      - fix/operations-contracts-rbac
+      - fix/pbkdf2-firestore-diagnostics
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      # Match Firebase's declared Node.js engine floor; keep npm pinned below for lockfile reproducibility.
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24.12.0
+          cache: npm
+      - name: Pin npm for lockfile compatibility
+        run: npm install --global npm@10.9.9
+      - name: Install dependencies
+        run: npm ci
+      - name: Dependency vulnerability report
+        shell: bash
+        run: |
+          npm audit --json > npm-audit.json || true
+          node --input-type=module -e "import fs from 'node:fs'; const audit = JSON.parse(fs.readFileSync('npm-audit.json', 'utf8')); const items = Object.entries(audit.vulnerabilities || {}).map(([name, item]) => ({ name, severity: item.severity, range: item.range, fixAvailable: item.fixAvailable, effects: item.effects, nodes: item.nodes, advisories: (item.via || []).map(via => typeof via === 'string' ? via : via.title) })); const counts = audit.metadata?.vulnerabilities || {}; console.log('Dependency audit summary:', JSON.stringify(counts)); if ((counts.high || 0) + (counts.moderate || 0) + (counts.critical || 0) > 0) process.exit(1); for (const item of items) console.log(JSON.stringify(item));"
+          npm audit --omit=dev --audit-level=low
+          npm ls @grpc/grpc-js @firebase/firestore @firebase/firestore-compat firebase @rollup/plugin-node-resolve deepmerge glob minimatch vite-plugin-pwa workbox-build --all || true
+      - name: TypeScript check
+        run: npm run lint
+      - name: Unit and security tests
+        run: npm test
+      - name: Production build
+        run: npm run build

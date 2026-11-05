@@ -1,36 +1,75 @@
 rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
-
-    // Helper functions
     function isAuthenticated() {
       return request.auth != null;
     }
 
-    function isSuperAdmin() {
-      return isAuthenticated() &&
-        exists(/databases/$(database)/documents/users/$(request.auth.uid)) &&
-        get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'super_admin' &&
-        get(/databases/$(database)/documents/users/$(request.auth.uid)).data.status == 'active';
-    }
-
-    // Users collection: users can read their own profile; only active super_admin can write
+    // The client may read only its own profile. All profile mutations are
+    // performed by the authenticated Cloudflare Worker backend.
     match /users/{userId} {
-      allow read: if isAuthenticated() && (request.auth.uid == userId || isSuperAdmin());
-      allow write: if isSuperAdmin();
+      allow get: if isAuthenticated() && request.auth.uid == userId;
+      allow list, create, update, delete: if false;
     }
 
-    // Models collection: Read allowed for all users / catalog viewers;
-    // Mutating operations (create, update, delete) are handled securely via Cloudflare Worker backend
+    // Catalog reads are intentionally public; every write is mediated by Worker.
     match /models/{modelId} {
       allow read: if true;
-      allow write: if isSuperAdmin();
+      allow write: if false;
     }
 
-    // Model names reservation locks: Internal unique namespace index
+    // Internal uniqueness reservations are backend-only.
     match /model_names/{nameHash} {
-      allow read: if isAuthenticated();
-      allow write: if isSuperAdmin();
+      allow read, write: if false;
     }
+
+    // Worker identities, machine assignments and secret-code hashes are backend-only.
+    match /workers/{workerId} {
+      allow read, write: if false;
+    }
+    match /worker_pins/{workerId} {
+      allow read, write: if false;
+    }
+    match /worker_auth_attempts/{workerId} {
+      allow read, write: if false;
+    }
+
+    // Named-code management identities and their hashes are backend-only.
+    match /management_codes/{uid} {
+      allow read, write: if false;
+    }
+    match /management_auth_attempts/{uid} {
+      allow read, write: if false;
+    }
+
+    // Responsible day/night reservations are internal coordination records.
+    match /management_responsible_slots/{shift} {
+      allow read, write: if false;
+    }
+
+    // Worker machine/shift reservations are backend-only coordination records.
+    match /worker_machine_slots/{slotId} {
+      allow read, write: if false;
+    }
+
+    // Tasks, progress ledger, conversations and cycle reports must only be
+    // accessed through Worker endpoints enforcing role/ownership checks.
+    match /tasks/{taskId} {
+      allow read, write: if false;
+    }
+    match /task_progress/{mutationId} {
+      allow read, write: if false;
+    }
+    match /messages/{messageId} {
+      allow read, write: if false;
+    }
+    match /conversations/{conversationId} {
+      allow read, write: if false;
+    }
+    match /machine_cycles/{reportId} {
+      allow read, write: if false;
+    }
+
+    // Deny every unlisted collection by default.
   }
 }

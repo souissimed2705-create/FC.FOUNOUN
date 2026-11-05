@@ -1,6 +1,7 @@
 import { initializeApp, getApps, getApp, FirebaseApp } from 'firebase/app';
 import { getAuth, Auth } from 'firebase/auth';
 import { getFirestore, Firestore, doc, getDoc } from 'firebase/firestore';
+import { getMissingFirebaseConfig } from '../utils/firebaseConfig';
 
 /**
  * Official Firebase Web Client Configuration
@@ -11,18 +12,15 @@ import { getFirestore, Firestore, doc, getDoc } from 'firebase/firestore';
  */
 const rawApiKey = (import.meta.env.VITE_FIREBASE_API_KEY || '').trim();
 
-// Use a validly formatted fallback key if none is provided via env,
-// preventing Firebase Web SDK from throwing a synchronous fatal `auth/invalid-api-key` error on load.
-const activeApiKey = rawApiKey || 'AIzaSyB-FCFOUNOUN-PROD-AUTH-KEY-DEMO99';
-
 const firebaseConfig = {
-  apiKey: activeApiKey,
+  apiKey: rawApiKey,
   authDomain: import.meta.env.VITE_FIREBASE_AUTH_DOMAIN || 'fc-founoun.firebaseapp.com',
-  projectId: 'fc-founoun',
-  storageBucket: import.meta.env.VITE_FIREBASE_STORAGE_BUCKET || 'fc-founoun.appspot.com',
-  messagingSenderId: import.meta.env.VITE_FIREBASE_MESSAGING_SENDER_ID || '',
-  appId: import.meta.env.VITE_FIREBASE_APP_ID || '',
+  projectId: (import.meta.env.VITE_FIREBASE_PROJECT_ID || 'fc-founoun').trim(),
+  messagingSenderId: (import.meta.env.VITE_FIREBASE_MESSAGING_SENDER_ID || '').trim(),
+  appId: (import.meta.env.VITE_FIREBASE_APP_ID || '').trim(),
 };
+
+const missingFirebaseConfig = getMissingFirebaseConfig(firebaseConfig);
 
 // Initialize Firebase App safely (singleton pattern)
 let app: FirebaseApp;
@@ -56,7 +54,12 @@ export const db: Firestore = dbInstance;
 
 // Check if a real custom API key is configured
 export const isFirebaseConfigured = (): boolean => {
-  return Boolean(rawApiKey && rawApiKey !== '' && !rawApiKey.includes('DEMO99'));
+  return missingFirebaseConfig.length === 0 && firebaseConfig.projectId === 'fc-founoun';
+};
+
+export const getFirebaseConfigurationError = (): string | null => {
+  if (isFirebaseConfigured()) return null;
+  return `إعداد Firebase غير مكتمل لمشروع fc-founoun. القيم الناقصة أو غير الصالحة: ${missingFirebaseConfig.join(', ')}. أضفها إلى متغيرات VITE_* ثم أعد بناء التطبيق.`;
 };
 
 /**
@@ -110,6 +113,31 @@ export async function verifySuperAdmin(uid: string): Promise<UserProfile> {
     role: data.role,
     status: data.status,
     displayName: data.displayName || 'المسؤول الرئيسي',
+    createdAt: data.createdAt,
+  };
+}
+
+
+/**
+ * Verifies that an authenticated management account is active.
+ * Both admin and super_admin may use the management workspace;
+ * super_admin-only actions must be checked separately by the backend.
+ */
+export async function verifyAdmin(uid: string): Promise<UserProfile> {
+  const userDocRef = doc(db, 'users', uid);
+  const docSnap = await getDoc(userDocRef);
+  if (!docSnap.exists()) throw new Error('NO_DOCUMENT');
+  const data = docSnap.data();
+  if (!data || !['admin', 'super_admin', 'responsible'].includes(data.role)) {
+    throw new Error('UNAUTHORIZED_ROLE');
+  }
+  if (data.status !== 'active') throw new Error('INACTIVE_ACCOUNT');
+  return {
+    uid,
+    email: data.email || '',
+    role: data.role,
+    status: data.status,
+    displayName: data.displayName || (data.role === 'super_admin' ? 'المشرف العام' : data.role === 'responsible' ? 'المسؤول' : 'المدير العام'),
     createdAt: data.createdAt,
   };
 }
