@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { MessageCircle, Send, RefreshCw } from 'lucide-react';
 import { auth } from '../lib/firebase';
 import { listContacts, listDirectMessages, sendDirectMessage } from '../lib/operationsApi';
@@ -19,6 +19,53 @@ export const PrivateMessagesPanel: React.FC = () => {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
   const [notice, setNotice] = useState('');
+  const seenMessageIds = useRef<Set<string> | null>(null);
+  const audioContextRef = useRef<AudioContext | null>(null);
+
+  const unlockMessageAudio = async () => {
+    try {
+      if (!audioContextRef.current || audioContextRef.current.state === 'closed') {
+        audioContextRef.current = new window.AudioContext();
+      }
+      if (audioContextRef.current.state !== 'running') await audioContextRef.current.resume();
+    } catch (err) { console.warn('Private message audio could not be unlocked:', err); }
+  };
+
+  const playIncomingMessageSound = async () => {
+    try {
+      let mode = 'strong';
+      try { mode = localStorage.getItem('fc-message-sound-mode') || 'strong'; } catch { /* storage unavailable */ }
+      if (mode === 'silent') return;
+      if (!audioContextRef.current || audioContextRef.current.state === 'closed') {
+        audioContextRef.current = new window.AudioContext();
+      }
+      const context = audioContextRef.current;
+      if (context.state !== 'running') await context.resume();
+      if (context.state !== 'running') return;
+      const notes = mode === 'soft' ? [660, 784] : mode === 'bright' ? [880, 1175, 1397] : [784, 988, 1175, 988, 1568];
+      const noteGap = mode === 'strong' ? 0.19 : 0.16;
+      const duration = mode === 'strong' ? 0.28 : 0.18;
+      const melodyDuration = (notes.length - 1) * noteGap + duration;
+      for (let repeat = 0; repeat < 3; repeat++) {
+        const repeatStart = context.currentTime + repeat * (melodyDuration + 0.35);
+        notes.forEach((frequency, index) => {
+          const oscillator = context.createOscillator();
+          const gain = context.createGain();
+          const start = repeatStart + index * noteGap;
+          oscillator.type = mode === 'strong' ? 'square' : 'sine';
+          oscillator.frequency.setValueAtTime(frequency, start);
+          gain.gain.setValueAtTime(0.0001, start);
+          gain.gain.exponentialRampToValueAtTime(mode === 'strong' ? 0.82 : 0.32, start + 0.025);
+          gain.gain.exponentialRampToValueAtTime(0.0001, start + duration);
+          oscillator.connect(gain); gain.connect(context.destination);
+          oscillator.start(start); oscillator.stop(start + duration + 0.01);
+        });
+      }
+      if (mode === 'strong' && typeof navigator.vibrate === 'function') {
+        navigator.vibrate([220, 80, 220, 80, 320, 350, 220, 80, 220, 80, 320, 350, 220, 80, 220, 80, 320]);
+      }
+    } catch (err) { console.warn('Private message sound unavailable:', err); }
+  };
 
   const refreshContacts = useCallback(async () => {
     try {
@@ -34,13 +81,32 @@ export const PrivateMessagesPanel: React.FC = () => {
     if (!selectedUid) { setMessages([]); return; }
     try {
       const result = await listDirectMessages(selectedUid);
-      setMessages(result.data || []);
+      const nextMessages = result.data || [];
+      const nextIds = new Set(nextMessages.map(message => message.id));
+      if (seenMessageIds.current) {
+        const hasIncoming = nextMessages.some(message =>
+          !seenMessageIds.current?.has(message.id) && message.senderUid !== auth.currentUser?.uid
+        );
+        if (hasIncoming) void playIncomingMessageSound();
+      }
+      seenMessageIds.current = nextIds;
+      setMessages(nextMessages);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'تعذر تحميل المحادثة الخاصة.');
     }
   }, [selectedUid]);
 
   useEffect(() => { void refreshContacts(); }, [refreshContacts]);
+  useEffect(() => {
+    const unlockOnce = () => { void unlockMessageAudio(); };
+    window.addEventListener('pointerdown', unlockOnce, { once: true, passive: true });
+    window.addEventListener('keydown', unlockOnce, { once: true });
+    return () => {
+      window.removeEventListener('pointerdown', unlockOnce);
+      window.removeEventListener('keydown', unlockOnce);
+    };
+  }, []);
+  useEffect(() => { seenMessageIds.current = null; }, [selectedUid]);
   useEffect(() => {
     void refreshMessages();
     if (!selectedUid) return;
