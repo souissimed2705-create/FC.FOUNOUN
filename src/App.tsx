@@ -42,6 +42,7 @@ export default function App() {
   };
   const closePrivateMessages = () => {
     setShowPrivateMessages(false);
+    setPrivateMessagesTargetUid('');
     if (window.history.state?.fcFounounModal === 'private-messages') window.history.back();
   };
   useEffect(() => {
