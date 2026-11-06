@@ -28,7 +28,7 @@ export const NotificationsBell: React.FC<{ onOpenNotification: (notification: No
      } catch (e) { console.warn('Message audio could not be unlocked:', e); }
   };
 
-  const playMessageSound = async (mode: 'soft' | 'bright' | 'strong' = soundMode === 'silent' ? 'strong' : soundMode) => {
+  const playMessageSound = async (mode: 'soft' | 'bright' | 'strong' | 'silent' = soundMode) => {
     if (mode === 'silent') return;
     try {
       if (!audioContextRef.current || audioContextRef.current.state === 'closed') {
