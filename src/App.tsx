@@ -34,7 +34,9 @@ export default function App() {
   const [sessionError, setSessionError] = useState<string | null>(null);
   const [isLoggingOut, setIsLoggingOut] = useState(false);
   const [showPrivateMessages, setShowPrivateMessages] = useState(false);
-  const openPrivateMessages = () => {
+  const [privateMessagesTargetUid, setPrivateMessagesTargetUid] = useState('');
+  const openPrivateMessages = (targetUid = '') => {
+    setPrivateMessagesTargetUid(targetUid);
     window.history.pushState({ fcFounounModal: 'private-messages' }, '');
     setShowPrivateMessages(true);
   };
@@ -44,7 +46,7 @@ export default function App() {
   };
   useEffect(() => {
     if (!showPrivateMessages) return;
-    const handleBack = () => setShowPrivateMessages(false);
+    const handleBack = () => { setShowPrivateMessages(false); setPrivateMessagesTargetUid(''); };
     window.addEventListener('popstate', handleBack);
     return () => window.removeEventListener('popstate', handleBack);
   }, [showPrivateMessages]);
@@ -157,7 +159,9 @@ export default function App() {
           {/* Right Action: PWA Install Button */}
           <div className="flex items-center gap-2">
             {(verifiedAdmin || verifiedWorker) && <>
-              <NotificationsBell />
+              <NotificationsBell onOpenNotification={(notification) => {
+                if (notification.type === 'direct_message') openPrivateMessages(notification.relatedUserId || '');
+              }} />
               <button type="button" onClick={openPrivateMessages} aria-label="فتح الرسائل الخاصة" title="الرسائل الخاصة" className="relative flex h-10 w-10 items-center justify-center rounded-full border border-[#D4AF37]/50 bg-[#D4AF37]/10 text-[#F5D77F] transition hover:bg-[#D4AF37]/20 focus:outline-none focus:ring-2 focus:ring-[#D4AF37]">
                 <MessageCircle className="h-5 w-5" />
               </button>
@@ -171,7 +175,7 @@ export default function App() {
         <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/80 p-3 backdrop-blur-sm" role="dialog" aria-modal="true" aria-label="المراسلات الخاصة" onClick={(event) => { if (event.target === event.currentTarget) closePrivateMessages(); }}>
           <section className="relative max-h-[88vh] w-full max-w-3xl overflow-y-auto rounded-2xl border border-[#D4AF37]/50 bg-[#0D0D0D] p-3 pt-14 shadow-2xl" dir="rtl">
             <button type="button" onClick={closePrivateMessages} aria-label="إغلاق الرسائل" className="absolute left-3 top-3 flex h-9 w-9 items-center justify-center rounded-full border border-white/15 bg-white/5 text-gray-200 hover:border-[#D4AF37]/60 hover:text-[#F5D77F]"><X className="h-5 w-5" /></button>
-            <PrivateMessagesPanel />
+            <PrivateMessagesPanel initialContactUid={privateMessagesTargetUid || undefined} />
           </section>
         </div>
       )}
