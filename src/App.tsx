@@ -163,7 +163,7 @@ export default function App() {
               <NotificationsBell onOpenNotification={(notification) => {
                 if (notification.type === 'direct_message') openPrivateMessages(notification.relatedUserId || '');
               }} />
-              <button type="button" onClick={openPrivateMessages} aria-label="فتح الرسائل الخاصة" title="الرسائل الخاصة" className="relative flex h-10 w-10 items-center justify-center rounded-full border border-[#D4AF37]/50 bg-[#D4AF37]/10 text-[#F5D77F] transition hover:bg-[#D4AF37]/20 focus:outline-none focus:ring-2 focus:ring-[#D4AF37]">
+              <button type="button" onClick={() => openPrivateMessages()} aria-label="فتح الرسائل الخاصة" title="الرسائل الخاصة" className="relative flex h-10 w-10 items-center justify-center rounded-full border border-[#D4AF37]/50 bg-[#D4AF37]/10 text-[#F5D77F] transition hover:bg-[#D4AF37]/20 focus:outline-none focus:ring-2 focus:ring-[#D4AF37]">
                 <MessageCircle className="h-5 w-5" />
               </button>
             </>}
