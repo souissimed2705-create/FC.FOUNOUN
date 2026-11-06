@@ -108,7 +108,7 @@ export const OperationsPanel: React.FC<Props> = ({ initialSection, admin, focusT
       void saveOfflineSnapshot(`management-tasks:${admin.uid}`, taskData).catch(() => undefined);
     } else {
       const cachedTasks = await readOfflineSnapshot<TaskRecord[]>(`management-tasks:${admin.uid}`).catch(() => null);
-      if (cachedTasks) setTasks(isResponsible ? [] : cachedTasks);
+      if (cachedTasks) setTasks(cachedTasks);
       else loadErrors.push(`قراءة أوامر الإنتاج: ${tasksResult.reason instanceof Error ? tasksResult.reason.message : 'تعذر تحميل أوامر الإنتاج.'}`);
     }
 
