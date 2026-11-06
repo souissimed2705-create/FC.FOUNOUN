@@ -103,7 +103,7 @@ export const OperationsPanel: React.FC<Props> = ({ initialSection, admin, focusT
     }
 
     if (tasksResult.status === 'fulfilled') {
-      const taskData = isResponsible ? [] : (tasksResult.value.data || []);
+      const taskData = tasksResult.value.data || [];
       setTasks(taskData);
       void saveOfflineSnapshot(`management-tasks:${admin.uid}`, taskData).catch(() => undefined);
     } else {
