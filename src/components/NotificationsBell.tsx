@@ -189,14 +189,14 @@ export const NotificationsBell: React.FC<{ onOpenNotification: (notification: No
                 <article key={item.id} className="border-b border-white/5 p-4">
                   <button
                     type="button"
-                    onClick={() => { if (item.type === 'direct_message') void openNotification(item); }}
-                    disabled={item.type !== 'direct_message'}
+                    onClick={() => { if (item.type === 'direct_message' || item.type.startsWith('task_')) void openNotification(item); }}
+                    disabled={item.type !== 'direct_message' && !item.type.startsWith('task_')}
                     className="block w-full text-right disabled:cursor-default"
-                    aria-label={item.type === 'direct_message' ? 'فتح المحادثة الخاصة' : 'الإشعار'}
+                    aria-label={item.type === 'direct_message' ? 'فتح المحادثة الخاصة' : item.type.startsWith('task_') ? 'فتح أمر الإنتاج المرتبط' : 'الإشعار'}
                   >
                     <b className="block text-sm text-white">{item.title}</b>
                     <p className="mt-1 text-sm leading-6 text-gray-300">{item.body}</p>
-                    {item.type === 'direct_message' && <span className="mt-2 inline-block text-xs text-[#F5D77F]">اضغط لفتح المحادثة ←</span>}
+                    {(item.type === 'direct_message' || item.type.startsWith('task_')) && <span className="mt-2 inline-block text-xs text-[#F5D77F]">{item.type === 'direct_message' ? 'اضغط لفتح المحادثة ←' : 'اضغط لفتح أمر الإنتاج ←'}</span>}
                   </button>
                   <div className="mt-3 flex items-center justify-between gap-3">
                     <time className="text-[10px] text-gray-500">
