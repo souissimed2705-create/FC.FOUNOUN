@@ -302,7 +302,7 @@ export const OperationsPanel: React.FC<Props> = ({ initialSection, admin, focusT
           </select>
           <select className="field" value={assignedWorkerId} onChange={e => setAssignedWorkerId(e.target.value)}>
             <option value="">اختر العامل</option>
-            {workers.filter(w => w.status === 'active' && (!isResponsible || !admin.shift || w.shift === admin.shift)).map(w => <option key={w.id} value={w.id}>{w.name} — مكينة {w.machineNumber ?? '?'} — {w.shift === 'day' ? 'نهار' : w.shift === 'night' ? 'ليل' : 'غير محدد'}</option>)}
+            {workers.filter(w => w.status === 'active' && (!isResponsible || w.shift === admin.shift)).map(w => <option key={w.id} value={w.id}>{w.name} — مكينة {w.machineNumber ?? '?'} — {w.shift === 'day' ? 'نهار' : w.shift === 'night' ? 'ليل' : 'غير محدد'}</option>)}
           </select>
           <input className="field" type="number" min="1" step="1" placeholder="الكمية المطلوبة" value={targetQuantity} onChange={e => setTargetQuantity(e.target.value)} />
           <input className="field" placeholder="ملاحظة أو تعليمات (اختياري)" value={description} onChange={e => setDescription(e.target.value)} />
