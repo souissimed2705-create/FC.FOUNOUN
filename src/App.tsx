@@ -50,7 +50,7 @@ export default function App() {
       try {
         const contactsResult = await listContacts();
         const contacts = contactsResult.data || [];
-        const senderName = notification.body.match(/^رسالة جديدة من (.+)\\.$/)?.[1]?.trim();
+        const senderName = notification.body.match(/^رسالة جديدة من (.+)\.$/)?.[1]?.trim();
         const namedCandidates = senderName ? contacts.filter(contact => contact.name.trim() === senderName) : [];
         const candidates = namedCandidates.length ? namedCandidates : contacts;
         const matches = await Promise.all(candidates.map(async contact => {
