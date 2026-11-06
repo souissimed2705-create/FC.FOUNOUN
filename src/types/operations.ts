@@ -10,4 +10,4 @@ export interface ChatMessage { id: string; workerId: string; senderUid: string; 
 export interface ProgressPayload { quantity: number; note?: string; clientMutationId: string; }
 export interface OperationsResponse<T> { success: boolean; data: T; nextPageToken?: string | null; message?: string; }
 
-export interface NotificationRecord { id: string; type: string; title: string; body: string; relatedId?: string; createdAt: string; readAt?: string | null; }
+export interface NotificationRecord { id: string; type: string; title: string; body: string; relatedId?: string; relatedUserId?: string; createdAt: string; readAt?: string | null; }
