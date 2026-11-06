@@ -37,6 +37,7 @@ export default function App() {
   const [isLoggingOut, setIsLoggingOut] = useState(false);
   const [showPrivateMessages, setShowPrivateMessages] = useState(false);
   const [privateMessagesTargetUid, setPrivateMessagesTargetUid] = useState('');
+  const [notificationTaskRequest, setNotificationTaskRequest] = useState<{ id: string; nonce: number } | null>(null);
   const openPrivateMessages = (targetUid = '') => {
     setPrivateMessagesTargetUid(targetUid);
     window.history.pushState({ fcFounounModal: 'private-messages' }, '');
@@ -44,6 +45,10 @@ export default function App() {
   };
 
   const handleNotificationOpen = async (notification: NotificationRecord) => {
+    if (notification.type.startsWith('task_')) {
+      setNotificationTaskRequest({ id: notification.relatedId || '', nonce: Date.now() });
+      return;
+    }
     if (notification.type !== 'direct_message') return;
     let targetUid = notification.relatedUserId || '';
     if (!targetUid && notification.relatedId) {
@@ -220,9 +225,9 @@ export default function App() {
             </span>
           </div>
         ) : verifiedAdmin ? (
-          <AdminDashboard admin={verifiedAdmin} onLogout={handleLogout} isLoggingOut={isLoggingOut} />
+          <AdminDashboard admin={verifiedAdmin} onLogout={handleLogout} isLoggingOut={isLoggingOut} notificationTaskRequest={notificationTaskRequest} />
         ) : verifiedWorker ? (
-          <WorkerDashboard worker={verifiedWorker} />
+          <WorkerDashboard worker={verifiedWorker} notificationTaskRequest={notificationTaskRequest} />
         ) : (
           <div className="w-full max-w-md mx-auto flex flex-col items-center">
             {/* Brand Logo & Presentation */}
