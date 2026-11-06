@@ -555,12 +555,7 @@ export async function runAllTests() {
   );
   assert(assertTaskManagementPermission('admin') === true, 'السماح للمدير العام بإدارة مهام الإنتاج');
   assert(assertTaskManagementPermission('super_admin') === true, 'السماح للمشرف العام بإدارة مهام الإنتاج');
-  assertThrowsWithCode(
-    () => assertTaskManagementPermission('responsible'),
-    'task_management_forbidden',
-    'منع المسؤول من إدارة مهام الإنتاج',
-    403
-  );
+  assert(assertTaskManagementPermission('responsible') === true, 'السماح للمسؤول بإدارة مهام الإنتاج ضمن نطاق ورديته');
   assertThrowsWithCode(
     () => assertTaskManagementPermission('worker'),
     'task_management_forbidden',
