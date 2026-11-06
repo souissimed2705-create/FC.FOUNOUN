@@ -55,6 +55,7 @@ import {
   assertWorkerTaskProgressAccess,
   computePinPbkdf2,
   computeStoredPinHash,
+  buildNotificationQuery,
 } from '../worker/worker.js';
 
 export async function runAllTests() {
@@ -103,6 +104,20 @@ export async function runAllTests() {
     invalidFirebaseConfig.join(',') === 'VITE_FIREBASE_API_KEY,VITE_FIREBASE_MESSAGING_SENDER_ID,VITE_FIREBASE_APP_ID',
     'رفض إعدادات Firebase غير الصالحة مع تسمية المتغيرات الناقصة بدقة'
   );
+
+  // Notification queries must scope reads to the authenticated recipient.
+  const notificationQuery = buildNotificationQuery('worker_123');
+  assert(
+    notificationQuery.structuredQuery.where.fieldFilter.field.fieldPath === 'recipientUid' &&
+    notificationQuery.structuredQuery.where.fieldFilter.value.stringValue === 'worker_123',
+    'حصر قراءة الإشعارات في حساب المستلم فقط'
+  );
+  assert(notificationQuery.structuredQuery.limit === 200, 'تحديد حجم قراءة الإشعارات لتفادي تحميل غير محدود');
+  let invalidNotificationRecipientRejected = false;
+  try { buildNotificationQuery(''); } catch (error) {
+    invalidNotificationRecipientRejected = (error as { code?: string }).code === 'invalid_notification_recipient';
+  }
+  assert(invalidNotificationRecipientRejected, 'رفض معرّف مستلم إشعار غير صالح');
 
   // 1. Test Name Normalization (casing and whitespace only, preserving Tashkeel & Tatweel)
   console.log('1. اختبارات توحيد الأسماء وحساب SHA-256 (من src/utils/modelNormalization.ts):');
@@ -540,12 +555,7 @@ export async function runAllTests() {
   );
   assert(assertTaskManagementPermission('admin') === true, 'السماح للمدير العام بإدارة مهام الإنتاج');
   assert(assertTaskManagementPermission('super_admin') === true, 'السماح للمشرف العام بإدارة مهام الإنتاج');
-  assertThrowsWithCode(
-    () => assertTaskManagementPermission('responsible'),
-    'task_management_forbidden',
-    'منع المسؤول من إدارة مهام الإنتاج',
-    403
-  );
+  assert(assertTaskManagementPermission('responsible') === true, 'السماح للمسؤول بإدارة مهام الإنتاج ضمن نطاق ورديته');
   assertThrowsWithCode(
     () => assertTaskManagementPermission('worker'),
     'task_management_forbidden',

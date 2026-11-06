@@ -10,6 +10,11 @@ import { WorkerLogin } from './components/WorkerLogin';
 import { NamedCodeLogin } from './components/NamedCodeLogin';
 import { WorkerDashboard } from './components/WorkerDashboard';
 import { PWAInstallBadge } from './components/PWAInstallBadge';
+import { NotificationsBell } from './components/NotificationsBell';
+import { PrivateMessagesPanel } from './components/PrivateMessagesPanel';
+import { listContacts, listDirectMessages } from './lib/operationsApi';
+import type { NotificationRecord } from './types/operations';
+import { MessageCircle, X } from 'lucide-react';
 import { useOnlineStatus } from './hooks/useOnlineStatus';
 import { WifiOff, Sparkles, Crown } from 'lucide-react';
 import { onAuthStateChanged, signOut } from 'firebase/auth';
@@ -30,6 +35,57 @@ export default function App() {
   const [isCheckingInitialAuth, setIsCheckingInitialAuth] = useState(true);
   const [sessionError, setSessionError] = useState<string | null>(null);
   const [isLoggingOut, setIsLoggingOut] = useState(false);
+  const [showPrivateMessages, setShowPrivateMessages] = useState(false);
+  const [privateMessagesTargetUid, setPrivateMessagesTargetUid] = useState('');
+  const [notificationTaskRequest, setNotificationTaskRequest] = useState<{ id: string; nonce: number } | null>(null);
+  const openPrivateMessages = (targetUid = '') => {
+    setPrivateMessagesTargetUid(targetUid);
+    window.history.pushState({ fcFounounModal: 'private-messages' }, '');
+    setShowPrivateMessages(true);
+  };
+
+  const handleNotificationOpen = async (notification: NotificationRecord) => {
+    if (notification.type.startsWith('task_')) {
+      setNotificationTaskRequest({ id: notification.relatedId || '', nonce: Date.now() });
+      return;
+    }
+    if (notification.type !== 'direct_message') return;
+    let targetUid = notification.relatedUserId || '';
+    if (!targetUid && notification.relatedId) {
+      try {
+        const contactsResult = await listContacts();
+        const contacts = contactsResult.data || [];
+        const senderName = notification.body.match(/^رسالة جديدة من (.+)\.$/)?.[1]?.trim();
+        const namedCandidates = senderName ? contacts.filter(contact => contact.name.trim() === senderName) : [];
+        const candidates = namedCandidates.length ? namedCandidates : contacts;
+        const matches = await Promise.all(candidates.map(async contact => {
+          try {
+            const conversation = await listDirectMessages(contact.uid);
+            return conversation.data?.some(message =>
+              message.id === notification.relatedId && message.senderUid === contact.uid
+            ) ? contact.uid : null;
+          } catch {
+            return null;
+          }
+        }));
+        targetUid = matches.find((uid): uid is string => Boolean(uid)) || '';
+      } catch (error) {
+        console.warn('Could not resolve the sender of a message notification:', error);
+      }
+    }
+    openPrivateMessages(targetUid);
+  };
+  const closePrivateMessages = () => {
+    setShowPrivateMessages(false);
+    setPrivateMessagesTargetUid('');
+    if (window.history.state?.fcFounounModal === 'private-messages') window.history.back();
+  };
+  useEffect(() => {
+    if (!showPrivateMessages) return;
+    const handleBack = () => { setShowPrivateMessages(false); setPrivateMessagesTargetUid(''); };
+    window.addEventListener('popstate', handleBack);
+    return () => window.removeEventListener('popstate', handleBack);
+  }, [showPrivateMessages]);
 
   // Synchronize and verify current active session against Firestore RBAC
   useEffect(() => {
@@ -138,10 +194,25 @@ export default function App() {
 
           {/* Right Action: PWA Install Button */}
           <div className="flex items-center gap-2">
+            {(verifiedAdmin || verifiedWorker) && <>
+              <NotificationsBell onOpenNotification={(notification) => { void handleNotificationOpen(notification); }} />
+              <button type="button" onClick={() => openPrivateMessages()} aria-label="فتح الرسائل الخاصة" title="الرسائل الخاصة" className="relative flex h-10 w-10 items-center justify-center rounded-full border border-[#D4AF37]/50 bg-[#D4AF37]/10 text-[#F5D77F] transition hover:bg-[#D4AF37]/20 focus:outline-none focus:ring-2 focus:ring-[#D4AF37]">
+                <MessageCircle className="h-5 w-5" />
+              </button>
+            </>}
             <PWAInstallBadge />
           </div>
         </div>
       </header>
+
+      {showPrivateMessages && (verifiedAdmin || verifiedWorker) && (
+        <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/80 p-3 backdrop-blur-sm" role="dialog" aria-modal="true" aria-label="المراسلات الخاصة" onClick={(event) => { if (event.target === event.currentTarget) closePrivateMessages(); }}>
+          <section className="relative max-h-[88vh] w-full max-w-3xl overflow-y-auto rounded-2xl border border-[#D4AF37]/50 bg-[#0D0D0D] p-3 pt-14 shadow-2xl" dir="rtl">
+            <button type="button" onClick={closePrivateMessages} aria-label="إغلاق الرسائل" className="absolute left-3 top-3 flex h-9 w-9 items-center justify-center rounded-full border border-white/15 bg-white/5 text-gray-200 hover:border-[#D4AF37]/60 hover:text-[#F5D77F]"><X className="h-5 w-5" /></button>
+            <PrivateMessagesPanel initialContactUid={privateMessagesTargetUid || undefined} />
+          </section>
+        </div>
+      )}
 
       {/* Main Content Area */}
       <main className="relative z-10 flex-1 flex flex-col items-center justify-center px-4 py-8 sm:py-12 w-full">
@@ -154,9 +225,9 @@ export default function App() {
             </span>
           </div>
         ) : verifiedAdmin ? (
-          <AdminDashboard admin={verifiedAdmin} onLogout={handleLogout} isLoggingOut={isLoggingOut} />
+          <AdminDashboard admin={verifiedAdmin} onLogout={handleLogout} isLoggingOut={isLoggingOut} notificationTaskRequest={notificationTaskRequest} />
         ) : verifiedWorker ? (
-          <WorkerDashboard worker={verifiedWorker} />
+          <WorkerDashboard worker={verifiedWorker} notificationTaskRequest={notificationTaskRequest} />
         ) : (
           <div className="w-full max-w-md mx-auto flex flex-col items-center">
             {/* Brand Logo & Presentation */}

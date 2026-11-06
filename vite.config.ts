@@ -13,6 +13,9 @@ export default defineConfig(() => {
       react(),
       tailwindcss(),
       VitePWA({
+        // Inject the service-worker registration explicitly into index.html.
+        // New builds activate automatically and refresh open app clients.
+        injectRegister: 'script',
         registerType: 'autoUpdate',
         includeAssets: ['favicon.png', 'apple-touch-icon.png', 'icon.svg'],
         manifest: {
@@ -51,6 +54,9 @@ export default defineConfig(() => {
         },
         workbox: {
           globPatterns: ['**/*.{js,css,html,ico,png,svg,woff,woff2}'],
+          clientsClaim: true,
+          skipWaiting: true,
+          cleanupOutdatedCaches: true,
         },
         devOptions: {
           enabled: true,

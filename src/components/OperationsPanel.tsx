@@ -2,6 +2,7 @@ import React, { useEffect, useState } from 'react';
 import { MessageCircle, Gauge } from 'lucide-react';
 import { createTask, createWorker, flushQueuedMutations, listTasks, listWorkers, queuedMutationCount, recordProgress, setWorkerPin, updateTask, updateWorker, listMachineCycles, getMachineCyclePhoto } from '../lib/operationsApi';
 import { PrivateMessagesPanel } from './PrivateMessagesPanel';
+import { CycleReportPhoto } from './CycleReportPhoto';
 import { listShoeModels } from '../lib/modelsApi';
 import { readOfflineSnapshot, saveOfflineSnapshot } from '../utils/offlineCache';
 import type { ShoeModel } from '../types/models';
@@ -9,9 +10,9 @@ import type { TaskRecord, WorkerRecord, MachineCycleRecord } from '../types/oper
 import type { UserProfile } from '../lib/firebase';
 
 type Section = 'workers' | 'tasks' | 'messages' | 'cycles';
-interface Props { initialSection: 'workers' | 'tasks'; admin: UserProfile; }
+interface Props { initialSection: 'workers' | 'tasks'; admin: UserProfile; focusTaskId?: string; }
 
-export const OperationsPanel: React.FC<Props> = ({ initialSection, admin }) => {
+export const OperationsPanel: React.FC<Props> = ({ initialSection, admin, focusTaskId }) => {
   const isSupervisor = admin.role === 'super_admin';
   const canFreezeWorkers = ['super_admin', 'admin', 'responsible'].includes(admin.role);
   const isResponsible = admin.role === 'responsible';
@@ -43,9 +44,18 @@ export const OperationsPanel: React.FC<Props> = ({ initialSection, admin }) => {
   const [progressId, setProgressId] = useState('');
   const [progressQuantity, setProgressQuantity] = useState('');
   const [error, setError] = useState<string | null>(null);
+  const [modelsError, setModelsError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const [pending, setPending] = useState(0);
   const [busy, setBusy] = useState(false);
+
+  useEffect(() => {
+    if (focusTaskId) setSection('tasks');
+  }, [focusTaskId]);
+  useEffect(() => {
+    if (!focusTaskId || section !== 'tasks' || !tasks.length) return;
+    document.getElementById(`admin-task-${focusTaskId}`)?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+  }, [focusTaskId, section, tasks]);
 
   const loadMoreCycles = async () => {
     if (!cycleNextPageToken || loadingMoreCycles) return;
@@ -67,40 +77,65 @@ export const OperationsPanel: React.FC<Props> = ({ initialSection, admin }) => {
 
   const refresh = async () => {
     setError(null);
-    try {
-      const [w, t, m, c] = await Promise.all([listWorkers(), isResponsible ? Promise.resolve({ data: [] as TaskRecord[] }) : listTasks(), listShoeModels({ pageSize: 100 }), listMachineCycles()]);
-      const workerData = w.data || [], taskData = isResponsible ? [] : (t.data || []), modelData = m.models || [], cycleData = c.data || [];
-      setCycleNextPageToken(c.nextPageToken || null);
+    const [workersResult, tasksResult, modelsResult, cyclesResult] = await Promise.allSettled([
+      listWorkers(),
+      listTasks(),
+      // Keep the same page size used by the working Models screen.
+      listShoeModels({ pageSize: 50 }),
+      listMachineCycles()
+    ]);
+
+    const loadErrors: string[] = [];
+
+    if (workersResult.status === 'fulfilled') {
+      const workerData = workersResult.value.data || [];
       setWorkers(workerData);
       setWorkerEdits(current => Object.fromEntries(workerData.map(worker => [worker.id, current[worker.id] || { name: worker.name, phone: worker.phone || '', machineNumber: String(worker.machineNumber || ''), shift: worker.shift || 'day' }])));
-      setTasks(taskData);
-      setModels(modelData);
-      setCycles(cycleData);
-      void Promise.all([
-        saveOfflineSnapshot(`management-workers:${admin.uid}`, workerData),
-        saveOfflineSnapshot(`management-tasks:${admin.uid}`, taskData),
-        saveOfflineSnapshot(`management-models:${admin.uid}`, modelData),
-        saveOfflineSnapshot(`management-cycles:${admin.uid}`, cycleData)
-      ]).catch(() => undefined);
-    } catch (e) {
-      const [cachedWorkers, cachedTasks, cachedModels, cachedCycles] = await Promise.all([
-        readOfflineSnapshot<WorkerRecord[]>(`management-workers:${admin.uid}`).catch(() => null),
-        readOfflineSnapshot<TaskRecord[]>(`management-tasks:${admin.uid}`).catch(() => null),
-        readOfflineSnapshot<ShoeModel[]>(`management-models:${admin.uid}`).catch(() => null),
-        readOfflineSnapshot<MachineCycleRecord[]>(`management-cycles:${admin.uid}`).catch(() => null)
-      ]);
-      if (cachedWorkers || cachedTasks || cachedModels || cachedCycles) {
-        const workerData = cachedWorkers || [], taskData = cachedTasks || [];
-        setWorkers(workerData);
-        setWorkerEdits(current => Object.fromEntries(workerData.map(worker => [worker.id, current[worker.id] || { name: worker.name, phone: worker.phone || '', machineNumber: String(worker.machineNumber || ''), shift: worker.shift || 'day' }])));
-        setTasks(isResponsible ? [] : taskData); setModels(cachedModels || []); setCycles(cachedCycles || []);
-        setNotice('أنت دون اتصال؛ تعرض آخر نسخة محفوظة من بيانات الإدارة. العمليات الجديدة ستنتظر المزامنة.');
+      void saveOfflineSnapshot(`management-workers:${admin.uid}`, workerData).catch(() => undefined);
+    } else {
+      const cachedWorkers = await readOfflineSnapshot<WorkerRecord[]>(`management-workers:${admin.uid}`).catch(() => null);
+      if (cachedWorkers) {
+        setWorkers(cachedWorkers);
+        setWorkerEdits(current => Object.fromEntries(cachedWorkers.map(worker => [worker.id, current[worker.id] || { name: worker.name, phone: worker.phone || '', machineNumber: String(worker.machineNumber || ''), shift: worker.shift || 'day' }])));
       } else {
-        setError(e instanceof Error ? e.message : 'تعذر تحميل البيانات ولا توجد نسخة محفوظة.');
+        loadErrors.push(`قراءة قائمة العمال: ${workersResult.reason instanceof Error ? workersResult.reason.message : 'تعذر تحميل قائمة العمال.'}`);
       }
     }
-  };
 
+    if (tasksResult.status === 'fulfilled') {
+      const taskData = tasksResult.value.data || [];
+      setTasks(taskData);
+      void saveOfflineSnapshot(`management-tasks:${admin.uid}`, taskData).catch(() => undefined);
+    } else {
+      const cachedTasks = await readOfflineSnapshot<TaskRecord[]>(`management-tasks:${admin.uid}`).catch(() => null);
+      if (cachedTasks) setTasks(cachedTasks);
+      else loadErrors.push(`قراءة أوامر الإنتاج: ${tasksResult.reason instanceof Error ? tasksResult.reason.message : 'تعذر تحميل أوامر الإنتاج.'}`);
+    }
+
+    if (modelsResult.status === 'fulfilled') {
+      const modelData = modelsResult.value.models || [];
+      setModels(modelData);
+      setModelsError(null);
+      void saveOfflineSnapshot(`management-models:${admin.uid}`, modelData).catch(() => undefined);
+    } else {
+      const cachedModels = await readOfflineSnapshot<ShoeModel[]>(`management-models:${admin.uid}`).catch(() => null);
+      setModels(cachedModels || []);
+      setModelsError(modelsResult.reason instanceof Error ? modelsResult.reason.message : 'تعذر تحميل قائمة الموديلات.');
+    }
+
+    if (cyclesResult.status === 'fulfilled') {
+      const cycleData = cyclesResult.value.data || [];
+      setCycleNextPageToken(cyclesResult.value.nextPageToken || null);
+      setCycles(cycleData);
+      void saveOfflineSnapshot(`management-cycles:${admin.uid}`, cycleData).catch(() => undefined);
+    } else {
+      const cachedCycles = await readOfflineSnapshot<MachineCycleRecord[]>(`management-cycles:${admin.uid}`).catch(() => null);
+      if (cachedCycles) setCycles(cachedCycles);
+      else loadErrors.push(`قراءة تقارير دورات المكائن: ${cyclesResult.reason instanceof Error ? cyclesResult.reason.message : 'تعذر تحميل تقارير دورات المكائن.'}`);
+    }
+
+    setError(loadErrors.length ? loadErrors.join(' · ') : null);
+  };
 
 
   useEffect(() => {
@@ -120,7 +155,7 @@ export const OperationsPanel: React.FC<Props> = ({ initialSection, admin }) => {
 
 
 
-  const runMutation = async (fn: () => Promise<unknown>, fallback?: { path: string; init: RequestInit }) => {
+  const runMutation = async (fn: () => Promise<unknown>, fallback?: { path: string; init: RequestInit }, onSuccess?: () => void): Promise<boolean> => {
     setError(null); setNotice(null);
     try {
       if (!navigator.onLine && fallback) {
@@ -128,11 +163,14 @@ export const OperationsPanel: React.FC<Props> = ({ initialSection, admin }) => {
         await queueMutation(fallback.path, fallback.init);
         setPending(await queuedMutationCount());
         setNotice('لا يوجد اتصال؛ حُفظت العملية وستتم مزامنتها عند عودة الاتصال.');
-        return;
+        onSuccess?.();
+        return true;
       }
       await fn();
       setNotice('تم الحفظ بنجاح.');
       await refresh();
+      onSuccess?.();
+      return true;
     } catch (e) {
       if (fallback && (e instanceof TypeError || !navigator.onLine)) {
         try {
@@ -140,25 +178,30 @@ export const OperationsPanel: React.FC<Props> = ({ initialSection, admin }) => {
           await queueMutation(fallback.path, fallback.init);
           setPending(await queuedMutationCount());
           setNotice('انقطع الاتصال أثناء الحفظ؛ حُفظت العملية على الهاتف وستتم مزامنتها عند عودة الاتصال.');
-          return;
+          onSuccess?.();
+          return true;
         } catch (queueError) {
           setError(queueError instanceof Error ? queueError.message : 'تعذر حفظ العملية محلياً.');
-          return;
+          return false;
         }
       }
       setError(e instanceof Error ? e.message : 'فشلت العملية.');
+      return false;
     }
   };
 
   const addWorker = (e: React.FormEvent) => {
     e.preventDefault();
-    if (!name.trim()) { setError('اسم العامل مطلوب.'); return; }
+    // Capture the submitted value once; do not clear the controlled input until
+    // the server confirms the create (or the offline queue confirms it saved).
+    // Use the controlled React input value directly; FormData may be empty on mobile.
+    const workerName = String(name || '').trim();
+    if (!workerName) { setError('اسم العامل مطلوب.'); return; }
     if (isSupervisor && !/^\d{6}$/.test(newWorkerPin)) { setError('عيّن للعامل PIN من 6 أرقام قبل إنشاء الحساب.'); return; }
     if (isSupervisor && !navigator.onLine) { setError('إنشاء العامل مع تعيين PIN يتطلب اتصالاً بالإنترنت لحماية الرمز السري وعدم حفظه مكشوفاً على الهاتف.'); return; }
-    const payload = { name: name.trim(), ...(!isResponsible ? { phone: phone.trim() } : {}), machineNumber: Number(machineNumber) as 1 | 2 | 3, shift, ...(isSupervisor ? { pin: newWorkerPin } : {}), clientMutationId: crypto.randomUUID() };
+    const payload = { name: workerName, ...(!isResponsible ? { phone: phone.trim() } : {}), machineNumber: Number(machineNumber) as 1 | 2 | 3, shift, ...(isSupervisor ? { pin: newWorkerPin } : {}), clientMutationId: crypto.randomUUID() };
     const fallback = !isSupervisor ? { path: '/api/workers', init: { method: 'POST' as const, body: JSON.stringify(payload) } } : undefined;
-    void runMutation(() => createWorker(payload), fallback);
-    setName(''); setPhone(''); setNewWorkerPin('');
+    void runMutation(() => createWorker(payload), fallback, () => { setName(''); setPhone(''); setNewWorkerPin(''); });
   };
 
   const addTask = (e: React.FormEvent) => {
@@ -171,6 +214,7 @@ export const OperationsPanel: React.FC<Props> = ({ initialSection, admin }) => {
     }
     const selectedWorker = workers.find(worker => worker.id === assignedWorkerId);
     if (!selectedWorker?.machineNumber || !selectedWorker.shift) { setError('يجب ربط مشرف العمال بمكينة ووردية قبل إسناد أمر الإنتاج.'); return; }
+    if (isResponsible && admin.shift && selectedWorker.shift !== admin.shift) { setError('يمكنك إسناد المهام إلى مشرفي العمال التابعين لورديتك فقط.'); return; }
     const payload = { title: 'إنتاج مودال ' + model.name, description: description.trim(), modelId: model.id, modelName: model.name, modelCategory: model.category, assignedWorkerId, targetQuantity: qty };
     if (editingTaskId) {
       const task = tasks.find(item => item.id === editingTaskId);
@@ -199,7 +243,7 @@ export const OperationsPanel: React.FC<Props> = ({ initialSection, admin }) => {
   }[status]);
   const tabs: { id: Section; label: string }[] = [
     ...(canManageWorkers ? [{ id: 'workers' as const, label: 'إدارة مشرفي العمال' }] : []),
-    ...(!isResponsible ? [{ id: 'tasks' as const, label: 'أوامر الإنتاج' }] : []),
+    { id: 'tasks' as const, label: 'أوامر الإنتاج' },
     { id: 'cycles', label: 'عدد دورات المكائن' },
     { id: 'messages', label: 'المحادثة' },
   ];
@@ -222,7 +266,7 @@ export const OperationsPanel: React.FC<Props> = ({ initialSection, admin }) => {
     {section === 'workers' && canManageWorkers && <div className="space-y-4">
       <h3 className="font-bold text-[#F5D77F]">إدارة العمال ورموز الدخول</h3>
       <form onSubmit={addWorker} className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-        <label className="block text-xs text-gray-300">اسم مشرف العمال<input className="field mt-1 w-full" placeholder="اكتب اسم العامل" value={name} onChange={e => setName(e.target.value)} /></label>
+        <label className="block text-xs text-gray-300">اسم مشرف العمال<input name="workerName" autoComplete="off" className="field mt-1 w-full" placeholder="اكتب اسم مشرف العمال" value={name} onChange={e => { setName(e.target.value); if (e.target.value.trim()) setError(null); }} /></label>
         {!isResponsible && <label className="block text-xs text-gray-300">رقم الهاتف (اختياري)<input className="field mt-1 w-full" placeholder="رقم الهاتف" value={phone} onChange={e => setPhone(e.target.value)} /></label>}
         <label className="block text-xs text-gray-300">تعيين المكينة<select className="field mt-1 w-full" value={machineNumber} onChange={e => setMachineNumber(e.target.value as '1' | '2' | '3')}><option value="1">المكينة 1</option><option value="2">المكينة 2</option><option value="3">المكينة 3</option></select></label>
         <label className="block text-xs text-gray-300">تعيين الوردية<select className="field mt-1 w-full" value={shift} onChange={e => setShift(e.target.value as 'day' | 'night')}><option value="day">الوردية النهارية</option><option value="night">الوردية الليلية</option></select></label>
@@ -230,7 +274,7 @@ export const OperationsPanel: React.FC<Props> = ({ initialSection, admin }) => {
         <button className="gold-button sm:col-span-2">إضافة مشرف عمال وحفظ بيانات الدخول</button>
       </form>
       <div className="space-y-2">{workers.map(w => <div key={w.id} className="flex flex-wrap items-center gap-2 rounded-xl border border-white/10 bg-[#0A0A0A] p-3">
-        <input className="field min-w-0 flex-1" aria-label="اسم العامل" value={workerEdits[w.id]?.name ?? w.name} onChange={e => setWorkerEdits(current => ({ ...current, [w.id]: { name: e.target.value, phone: current[w.id]?.phone ?? w.phone ?? '', machineNumber: current[w.id]?.machineNumber ?? String(w.machineNumber || ''), shift: current[w.id]?.shift ?? w.shift ?? 'day' } }))} />
+        <input className="field w-full min-w-0 basis-full flex-none" aria-label="اسم العامل" value={workerEdits[w.id]?.name ?? w.name} onChange={e => setWorkerEdits(current => ({ ...current, [w.id]: { name: e.target.value, phone: current[w.id]?.phone ?? w.phone ?? '', machineNumber: current[w.id]?.machineNumber ?? String(w.machineNumber || ''), shift: current[w.id]?.shift ?? w.shift ?? 'day' } }))} />
         {!isResponsible && <input className="field w-32" aria-label="هاتف العامل" value={workerEdits[w.id]?.phone ?? w.phone ?? ''} onChange={e => setWorkerEdits(current => ({ ...current, [w.id]: { name: current[w.id]?.name ?? w.name, phone: e.target.value, machineNumber: current[w.id]?.machineNumber ?? String(w.machineNumber || ''), shift: current[w.id]?.shift ?? w.shift ?? 'day' } }))} />}
         <span className="text-xs text-[#F5D77F]">المكينة {w.machineNumber ?? 'غير محددة'} · {w.shift === 'day' ? 'نهار' : w.shift === 'night' ? 'ليل' : 'وردية غير محددة'}</span><span className="text-xs text-gray-500 font-mono">المعرّف: {w.id}</span>
         <span className="text-xs text-gray-400">{w.status}</span>
@@ -248,7 +292,7 @@ export const OperationsPanel: React.FC<Props> = ({ initialSection, admin }) => {
       </div>)}</div>
     </div>}
 
-    {section === 'tasks' && <div className="space-y-5">
+    {section === 'tasks' && <div className="space-y-5">\n      {modelsError && <div role="alert" className="rounded-lg border border-amber-500/40 bg-amber-950/30 p-3 text-sm text-amber-200">تعذر تحديث قائمة الموديلات؛ تُعرض آخر نسخة محفوظة إن وُجدت. {modelsError}</div>}
       <div className="rounded-xl border border-[#D4AF37]/25 bg-[#0A0A0A] p-4 space-y-3">
         <h3 className="font-bold text-[#F5D77F]">{editingTaskId ? 'تعديل أمر الإنتاج' : 'إصدار أمر إنتاج جديد'}</h3>
         <form onSubmit={addTask} className="grid grid-cols-1 sm:grid-cols-2 gap-2">
@@ -258,7 +302,7 @@ export const OperationsPanel: React.FC<Props> = ({ initialSection, admin }) => {
           </select>
           <select className="field" value={assignedWorkerId} onChange={e => setAssignedWorkerId(e.target.value)}>
             <option value="">اختر العامل</option>
-            {workers.filter(w => w.status === 'active').map(w => <option key={w.id} value={w.id}>{w.name} — مكينة {w.machineNumber ?? '?'} — {w.shift === 'day' ? 'نهار' : w.shift === 'night' ? 'ليل' : 'غير محدد'}</option>)}
+            {workers.filter(w => w.status === 'active' && (!isResponsible || w.shift === admin.shift)).map(w => <option key={w.id} value={w.id}>{w.name} — مكينة {w.machineNumber ?? '?'} — {w.shift === 'day' ? 'نهار' : w.shift === 'night' ? 'ليل' : 'غير محدد'}</option>)}
           </select>
           <input className="field" type="number" min="1" step="1" placeholder="الكمية المطلوبة" value={targetQuantity} onChange={e => setTargetQuantity(e.target.value)} />
           <input className="field" placeholder="ملاحظة أو تعليمات (اختياري)" value={description} onChange={e => setDescription(e.target.value)} />
@@ -277,7 +321,7 @@ export const OperationsPanel: React.FC<Props> = ({ initialSection, admin }) => {
           <button className="gold-button">تسجيل الإنجاز</button>
         </form>
       </div>
-      <div className="space-y-2">{tasks.map(t => <article key={t.id} className="rounded-xl border border-white/10 bg-[#0A0A0A] p-3">
+      <div className="space-y-2">{tasks.map(t => <article id={`admin-task-${t.id}`} key={t.id} className="rounded-xl border border-white/10 bg-[#0A0A0A] p-3">
         <div className="flex justify-between gap-2"><b>{t.modelName || t.title}</b><span className="text-xs text-[#F5D77F]">{taskStatusLabel(t.status)}</span></div>
         {t.description && <p className="text-sm text-gray-400 mt-1">{t.description}</p>}
         <p className="text-xs text-gray-400 mt-1">المكينة: {t.machineNumber ?? '—'} · الوردية: {t.shift === 'day' ? 'نهار' : t.shift === 'night' ? 'ليل' : '—'} · مشرف العمال: {t.assignedWorkerName || t.assignedWorkerId} · المطلوب: {t.targetQuantity} · المنجز: {t.completedQuantity} · المتبقي: {Math.max(0, t.targetQuantity - t.completedQuantity)}</p>
@@ -296,7 +340,7 @@ export const OperationsPanel: React.FC<Props> = ({ initialSection, admin }) => {
       </div>
       <p className="text-xs text-gray-500">عدد التقارير المعروضة: {filteredCycles.length}{cycleNextPageToken ? ' · توجد تقارير أقدم' : ''}</p>
       {!filteredCycles.length && <p className="rounded-xl border border-white/10 bg-[#080808] p-6 text-center text-sm text-gray-500">لا توجد تقارير تطابق عوامل التصفية في الصفحات المحمّلة.</p>}
-      {filteredCycles.map(report => <article key={report.id} className="rounded-xl border border-white/10 bg-[#080808] p-3"><div className="flex flex-wrap items-center justify-between gap-2"><b>المكينة {report.machineNumber} · {report.shift === 'day' ? 'النهار' : 'الليل'}</b><strong className="text-[#F5D77F]">{report.count.toLocaleString('ar-TN')} دورة</strong></div><p className="mt-1 text-xs text-gray-400">{report.date}{report.recordedAt ? ` · ${new Date(report.recordedAt).toLocaleString('ar-TN', { timeZone: 'Africa/Tunis' })}` : ''} · {report.workerName}</p><p className="mt-1 text-xs text-gray-500">{report.hasPhoto ? <button className="secondary-button mt-2" onClick={async () => { try { const result = await getMachineCyclePhoto(report.id); setSelectedCyclePhoto(result.data); } catch (e) { setError(e instanceof Error ? e.message : 'تعذر عرض صورة العداد.'); } }}>عرض صورة العداد</button> : 'لا توجد صورة مرفقة'}</p></article>)}
+      {filteredCycles.map(report => <article key={report.id} className="rounded-xl border border-white/10 bg-[#080808] p-3"><div className="flex flex-wrap items-center justify-between gap-2"><b>المكينة {report.machineNumber} · {report.shift === 'day' ? 'النهار' : 'الليل'}</b><strong className="text-[#F5D77F]">{report.count.toLocaleString('ar-TN')} دورة</strong></div><p className="mt-1 text-xs text-gray-400">{report.date}{report.recordedAt ? ` · ${new Date(report.recordedAt).toLocaleString('ar-TN', { timeZone: 'Africa/Tunis' })}` : ''} · {report.workerName}</p><p className="mt-1 text-xs text-gray-500">{report.hasPhoto ? <CycleReportPhoto reportId={report.id} loadPhoto={getMachineCyclePhoto} onOpen={setSelectedCyclePhoto} /> : <p className="mt-2 text-xs text-gray-500">لا توجد صورة مرفقة</p>}</p></article>)}
       {cycleNextPageToken && <button className="secondary-button w-full" disabled={loadingMoreCycles} onClick={() => void loadMoreCycles()}>{loadingMoreCycles ? 'جارٍ تحميل التقارير...' : 'تحميل التقارير الأقدم'}</button>}
     </div>}
 

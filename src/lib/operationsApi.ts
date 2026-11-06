@@ -41,6 +41,7 @@ export const freezeManagementAccount = (uid: string) => request<OperationsRespon
 export const listContacts = () => request<OperationsResponse<ContactRecord[]>>('/api/contacts');
 export const listDirectMessages = (otherUid: string) => request<OperationsResponse<ChatMessage[]>>(`/api/direct-messages/${encodeURIComponent(otherUid)}`);
 export const sendDirectMessage = (otherUid: string, text: string) => request<OperationsResponse<ChatMessage>>(`/api/direct-messages/${encodeURIComponent(otherUid)}`, { method: 'POST', body: JSON.stringify({ text }) });
+export const getMyMachineCyclePhoto = (id: string) => request<OperationsResponse<{ id: string; photo: string }>>(`/api/worker/cycles/${encodeURIComponent(id)}/photo`);
 export const listMyMachineCycles = (pageToken?: string | null) => {
   const params = new URLSearchParams({ pageSize: '100' });
   if (pageToken) params.set('pageToken', pageToken);
@@ -98,3 +99,7 @@ export const updateMyTaskStatus = (id: string, status: 'pending' | 'in_progress'
 export const recordMyProgress = (id: string, payload: ProgressPayload) => request<OperationsResponse<TaskRecord>>(`/api/worker/tasks/${encodeURIComponent(id)}/progress`, { method: 'POST', body: JSON.stringify(payload) });
 export const listMyConversation = () => request<OperationsResponse<ChatMessage[]>>('/api/worker/messages');
 export const sendWorkerMessage = (text: string) => request<OperationsResponse<ChatMessage>>('/api/worker/messages', { method: 'POST', body: JSON.stringify({ text }) });
+
+export interface NotificationRecord { id: string; type: string; title: string; body: string; relatedId?: string; relatedUserId?: string; createdAt: string; readAt?: string | null; }
+export const listNotifications = () => request<OperationsResponse<NotificationRecord[]>>('/api/notifications');
+export const markNotificationRead = (id: string) => request<OperationsResponse<NotificationRecord>>(`/api/notifications/${encodeURIComponent(id)}/read`, { method: 'PUT' });

@@ -2,25 +2,53 @@ import React, { useCallback, useEffect, useState } from 'react';
 import { signOut } from 'firebase/auth';
 import { Home, ClipboardList, LogOut, MessageCircle, RefreshCw, Gauge, Package } from 'lucide-react';
 import { auth } from '../lib/firebase';
-import { listMyTasks, recordMyProgress, updateMyTaskStatus, listMyMachineCycles, submitMachineCycle, queueMutation, flushQueuedMutations, queuedMutationCount } from '../lib/operationsApi';
+import { listMyTasks, recordMyProgress, updateMyTaskStatus, listMyMachineCycles, getMyMachineCyclePhoto, submitMachineCycle, queueMutation, flushQueuedMutations, queuedMutationCount } from '../lib/operationsApi';
 import { PrivateMessagesPanel } from './PrivateMessagesPanel';
+import { CycleReportPhoto } from './CycleReportPhoto';
 import { ModelsPanel } from './ModelsPanel';
 import { optimizeAndEncodeImage } from '../utils/imageOptimizer';
 import { readOfflineSnapshot, saveOfflineSnapshot } from '../utils/offlineCache';
 import type { TaskRecord, MachineCycleRecord } from '../types/operations';
 
-interface Props { worker: { id: string; name: string }; }
+interface Props { worker: { id: string; name: string }; notificationTaskRequest?: { id: string; nonce: number } | null; }
 type Page = 'home' | 'models' | 'tasks' | 'messages' | 'cycles';
 
-export const WorkerDashboard: React.FC<Props> = ({ worker }) => {
+export const WorkerDashboard: React.FC<Props> = ({ worker, notificationTaskRequest }) => {
   const [page, setPage] = useState<Page>('home');
+  useEffect(() => {
+    window.history.pushState({ fcFounounPage: 'worker', page: 'home' }, '');
+    const handleBack = (event: PopStateEvent) => {
+      if (event.state?.fcFounounPage === 'worker') setPage(event.state.page as Page);
+      else setPage('home');
+    };
+    window.addEventListener('popstate', handleBack);
+    return () => window.removeEventListener('popstate', handleBack);
+  }, []);
+  useEffect(() => {
+    if (!notificationTaskRequest) return;
+    window.history.pushState({ fcFounounPage: 'worker', page: 'tasks' }, '');
+    setPage('tasks');
+  }, [notificationTaskRequest?.nonce]);
+  const navigatePage = (next: Page) => {
+    window.history.pushState({ fcFounounPage: 'worker', page: next }, '');
+    setPage(next);
+  };
+  const returnHome = () => {
+    if (page !== 'home' && window.history.state?.fcFounounPage === 'worker') window.history.back();
+    else setPage('home');
+  };
   const [tasks, setTasks] = useState<TaskRecord[]>([]);
+  useEffect(() => {
+    if (page !== 'tasks' || !notificationTaskRequest?.id || !tasks.length) return;
+    document.getElementById(`worker-task-${notificationTaskRequest.id}`)?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+  }, [page, tasks, notificationTaskRequest?.nonce]);
   const [cycles, setCycles] = useState<MachineCycleRecord[]>([]);
   const [cycleNextPageToken, setCycleNextPageToken] = useState<string | null>(null);
   const [loadingMoreCycles, setLoadingMoreCycles] = useState(false);
   const [cycleCount, setCycleCount] = useState('');
   const [cyclePhoto, setCyclePhoto] = useState('');
   const [cyclePhotoName, setCyclePhotoName] = useState('');
+  const [selectedCyclePhoto, setSelectedCyclePhoto] = useState<{ id: string; photo: string } | null>(null);
   const [quantities, setQuantities] = useState<Record<string, string>>({});
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
@@ -186,16 +214,16 @@ export const WorkerDashboard: React.FC<Props> = ({ worker }) => {
   return <section dir="rtl" className="w-full max-w-3xl space-y-4">
     <header className="flex items-center justify-between gap-3 rounded-2xl border border-[#D4AF37]/35 bg-gradient-to-l from-[#211B0B] to-[#111] p-4">
       <div><h2 className="text-lg font-bold text-[#F5D77F]">{page === 'home' ? 'الرئيسية' : page === 'models' ? 'الموديلات والبحث' : page === 'tasks' ? 'مهامي' : page === 'cycles' ? 'عدد دورات المكينة' : 'المراسلات الخاصة'}</h2><p className="text-sm text-gray-300">{worker.name}</p></div>
-      <div className="flex items-center gap-2">{page !== 'home' && <button type="button" onClick={() => { setPage('home'); setError(''); setNotice(''); }} aria-label="العودة إلى واجهة الاستقبال" title="العودة إلى واجهة الاستقبال" className="flex h-10 w-10 items-center justify-center rounded-full border border-[#D4AF37]/50 bg-[#D4AF37]/10 text-[#F5D77F] transition hover:bg-[#D4AF37]/20 focus:outline-none focus:ring-2 focus:ring-[#D4AF37]"><Home className="h-5 w-5" /></button>}<button className="danger-button" onClick={() => void signOut(auth)}><LogOut className="w-4 h-4" /> خروج</button></div>
+      <div className="flex items-center gap-2">{page !== 'home' && <button type="button" onClick={() => { returnHome(); setError(''); setNotice(''); }} aria-label="العودة إلى واجهة الاستقبال" title="العودة إلى واجهة الاستقبال" className="flex h-10 w-10 items-center justify-center rounded-full border border-[#D4AF37]/50 bg-[#D4AF37]/10 text-[#F5D77F] transition hover:bg-[#D4AF37]/20 focus:outline-none focus:ring-2 focus:ring-[#D4AF37]"><Home className="h-5 w-5" /></button>}<button className="danger-button" onClick={() => void signOut(auth)}><LogOut className="w-4 h-4" /> خروج</button></div>
     </header>
 
     {page === 'home' && <>
       <div className="rounded-xl border border-[#D4AF37]/20 bg-[#111] px-4 py-3"><p className="text-sm leading-7 text-[#F5D77F]">أهلاً بك يا {worker.name}. نفّذ مهامك وسجّل إنجازك وتواصل مع المسؤول عند الحاجة.</p></div>
       <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-        <button onClick={() => { setPage('models'); setError(''); setNotice(''); }} className="flex min-h-28 items-center gap-4 rounded-2xl border border-[#D4AF37]/35 bg-[#111] p-5 text-right hover:border-[#D4AF37]"><span className="flex h-14 w-14 items-center justify-center rounded-xl bg-[#D4AF37]/10 text-[#F5D77F]"><Package className="h-7 w-7" /></span><span><b className="block text-base">الموديلات والبحث</b><small className="mt-1 block text-xs leading-5 text-gray-400">ابحث عن الموديلات واعرض القياسات والصور المكبرة.</small></span></button>
-        <button onClick={() => { setPage('tasks'); setError(''); setNotice(''); void refresh(); }} className="flex min-h-28 items-center gap-4 rounded-2xl border border-[#D4AF37]/35 bg-[#111] p-5 text-right hover:border-[#D4AF37]"><span className="flex h-14 w-14 items-center justify-center rounded-xl bg-[#D4AF37]/10 text-[#F5D77F]"><ClipboardList className="h-7 w-7" /></span><span><b className="block text-base">مهامي وتنفيذ الإنتاج</b><small className="mt-1 block text-xs leading-5 text-gray-400">عرض الكميات المطلوبة وتسجيل المنجز وتعليق المهمة أو استئنافها.</small></span></button>
-        <button onClick={() => { setPage('cycles'); setError(''); setNotice(''); void refreshCycles(); }} className="flex min-h-28 items-center gap-4 rounded-2xl border border-[#D4AF37]/35 bg-[#111] p-5 text-right hover:border-[#D4AF37]"><span className="flex h-14 w-14 items-center justify-center rounded-xl bg-[#D4AF37]/10 text-[#F5D77F]"><Gauge className="h-7 w-7" /></span><span><b className="block text-base">عدد دورات المكينة</b><small className="mt-1 block text-xs leading-5 text-gray-400">سجّل عدد دورات ورديتك وأرفق صورة العداد.</small></span></button>
-        <button onClick={() => { setPage('messages'); setError(''); setNotice(''); }} className="flex min-h-28 items-center gap-4 rounded-2xl border border-[#D4AF37]/35 bg-[#111] p-5 text-right hover:border-[#D4AF37]"><span className="flex h-14 w-14 items-center justify-center rounded-xl bg-[#D4AF37]/10 text-[#F5D77F]"><MessageCircle className="h-7 w-7" /></span><span><b className="block text-base">المراسلات الخاصة</b><small className="mt-1 block text-xs leading-5 text-gray-400">محادثات خاصة مع أي مستخدم نشط في النظام.</small></span></button>
+        <button onClick={() => { navigatePage('models'); setError(''); setNotice(''); }} className="flex min-h-28 items-center gap-4 rounded-2xl border border-[#D4AF37]/35 bg-[#111] p-5 text-right hover:border-[#D4AF37]"><span className="flex h-14 w-14 items-center justify-center rounded-xl bg-[#D4AF37]/10 text-[#F5D77F]"><Package className="h-7 w-7" /></span><span><b className="block text-base">الموديلات والبحث</b><small className="mt-1 block text-xs leading-5 text-gray-400">ابحث عن الموديلات واعرض القياسات والصور المكبرة.</small></span></button>
+        <button onClick={() => { navigatePage('tasks'); setError(''); setNotice(''); void refresh(); }} className="flex min-h-28 items-center gap-4 rounded-2xl border border-[#D4AF37]/35 bg-[#111] p-5 text-right hover:border-[#D4AF37]"><span className="flex h-14 w-14 items-center justify-center rounded-xl bg-[#D4AF37]/10 text-[#F5D77F]"><ClipboardList className="h-7 w-7" /></span><span><b className="block text-base">مهامي وتنفيذ الإنتاج</b><small className="mt-1 block text-xs leading-5 text-gray-400">عرض الكميات المطلوبة وتسجيل المنجز وتعليق المهمة أو استئنافها.</small></span></button>
+        <button onClick={() => { navigatePage('cycles'); setError(''); setNotice(''); void refreshCycles(); }} className="flex min-h-28 items-center gap-4 rounded-2xl border border-[#D4AF37]/35 bg-[#111] p-5 text-right hover:border-[#D4AF37]"><span className="flex h-14 w-14 items-center justify-center rounded-xl bg-[#D4AF37]/10 text-[#F5D77F]"><Gauge className="h-7 w-7" /></span><span><b className="block text-base">عدد دورات المكينة</b><small className="mt-1 block text-xs leading-5 text-gray-400">سجّل عدد دورات ورديتك وأرفق صورة العداد.</small></span></button>
+        <button onClick={() => { navigatePage('messages'); setError(''); setNotice(''); }} className="flex min-h-28 items-center gap-4 rounded-2xl border border-[#D4AF37]/35 bg-[#111] p-5 text-right hover:border-[#D4AF37]"><span className="flex h-14 w-14 items-center justify-center rounded-xl bg-[#D4AF37]/10 text-[#F5D77F]"><MessageCircle className="h-7 w-7" /></span><span><b className="block text-base">المراسلات الخاصة</b><small className="mt-1 block text-xs leading-5 text-gray-400">محادثات خاصة مع أي مستخدم نشط في النظام.</small></span></button>
       </div>
     </>}
 
@@ -208,7 +236,7 @@ export const WorkerDashboard: React.FC<Props> = ({ worker }) => {
     {page === 'tasks' && <div className="rounded-2xl border border-white/10 bg-[#111] p-4 space-y-4">
       <div className="flex items-center justify-between"><h3 className="font-bold text-[#F5D77F]">أوامر الإنتاج المسندة إليك</h3><button className="secondary-button" onClick={() => void refresh()}><RefreshCw className="w-4 h-4" /> تحديث</button></div>
       {!tasks.length && <p className="py-6 text-center text-sm text-gray-400">لا توجد أوامر إنتاج مسندة إليك حالياً.</p>}
-      <div className="space-y-3">{tasks.map(task => <article key={task.id} className="rounded-xl border border-white/10 bg-[#080808] p-4 space-y-2">
+      <div className="space-y-3">{tasks.map(task => <article id={`worker-task-${task.id}`} key={task.id} className="rounded-xl border border-white/10 bg-[#080808] p-4 space-y-2">
         <div className="flex items-center justify-between gap-2"><div><h3 className="font-bold">{task.modelName || task.title}</h3>{task.modelCategory && <p className="text-xs text-[#D4AF37]">{task.modelCategory}</p>}</div><span className="text-xs text-[#F5D77F]">{statusLabel(task.status)}</span></div>
         {task.description && <p className="text-sm text-gray-400">{task.description}</p>}
         <p className="text-sm text-gray-400">المطلوب: {task.targetQuantity} · المنجز: {task.completedQuantity} · المتبقي: {Math.max(0, task.targetQuantity - task.completedQuantity)}</p>
@@ -230,10 +258,12 @@ export const WorkerDashboard: React.FC<Props> = ({ worker }) => {
       </form>
       <div className="space-y-2"><div className="flex items-center justify-between"><h4 className="font-semibold">سجل تقاريري السابقة</h4><button className="secondary-button" onClick={() => void refreshCycles()}>تحديث</button></div>
         {!cycles.length && <p className="py-4 text-center text-xs text-gray-500">لا توجد تقارير مسجلة بعد.</p>}
-        {cycles.map(report => <article key={report.id} className="rounded-xl border border-white/10 bg-[#080808] p-3"><div className="flex justify-between gap-2"><b>المكينة {report.machineNumber} · {report.shift === 'day' ? 'النهار' : 'الليل'}</b><strong className="text-[#F5D77F]">{report.count.toLocaleString('ar-TN')} دورة</strong></div><p className="mt-1 text-xs text-gray-400">{report.date} · {new Date(report.recordedAt).toLocaleTimeString('ar-TN', { timeZone: 'Africa/Tunis' })}</p></article>)}
+        {cycles.map(report => <article key={report.id} className="rounded-xl border border-white/10 bg-[#080808] p-3"><div className="flex justify-between gap-2"><b>المكينة {report.machineNumber} · {report.shift === 'day' ? 'النهار' : 'الليل'}</b><strong className="text-[#F5D77F]">{report.count.toLocaleString('ar-TN')} دورة</strong></div><p className="mt-1 text-xs text-gray-400">{report.date} · {new Date(report.recordedAt).toLocaleTimeString('ar-TN', { timeZone: 'Africa/Tunis' })}</p>{report.hasPhoto && <CycleReportPhoto reportId={report.id} loadPhoto={getMyMachineCyclePhoto} onOpen={photo => { setSelectedCyclePhoto(photo); setError(''); }} alt="صورة عداد المكينة المحفوظة" />}</article>)}
         {cycleNextPageToken && <button className="secondary-button w-full" disabled={loadingMoreCycles} onClick={() => void loadMoreCycles()}>{loadingMoreCycles ? 'جارٍ تحميل التقارير...' : 'تحميل التقارير الأقدم'}</button>}
       </div>
     </div>}
+
+    {selectedCyclePhoto && <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/90 p-4" role="dialog" aria-modal="true" aria-label="صورة العداد المحفوظة" onClick={() => setSelectedCyclePhoto(null)}><div className="max-h-[90vh] max-w-3xl rounded-xl border border-[#D4AF37]/40 bg-[#111] p-3" onClick={e => e.stopPropagation()}><div className="mb-2 flex justify-between"><b className="text-[#F5D77F]">صورة العداد المحفوظة</b><button className="secondary-button" onClick={() => setSelectedCyclePhoto(null)}>إغلاق</button></div><img src={selectedCyclePhoto.photo} alt="صورة عداد المكينة المحفوظة" className="max-h-[78vh] w-auto rounded-lg object-contain" /></div></div>}
 
     {page === 'messages' && <PrivateMessagesPanel />}
   </section>;

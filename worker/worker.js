@@ -88,20 +88,25 @@ export default {
     const directMessagesMatch = cleanPath.match(/^\/api\/direct-messages\/([^/]+)$/);
     const directMessagesRoute = directMessagesMatch && ['GET', 'POST'].includes(request.method);
     const workerCyclesRoute = cleanPath === '/api/worker/cycles' && ['GET', 'POST'].includes(request.method);
+    const workerCyclePhotoMatch = cleanPath.match(/^\/api\/worker\/cycles\/([^/]+)\/photo$/);
+    const workerCyclePhotoRoute = Boolean(workerCyclePhotoMatch && request.method === 'GET');
+    const notificationsListRoute = cleanPath === '/api/notifications' && request.method === 'GET';
+    const notificationReadMatch = cleanPath.match(/^\/api\/notifications\/([^/]+)\/read$/);
+    const notificationReadRoute = Boolean(notificationReadMatch && request.method === 'PUT');
     const managementCyclesRoute = cleanPath === '/api/cycles' && request.method === 'GET';
     const cyclePhotoMatch = cleanPath.match(/^\/api\/cycles\/([^/]+)\/photo$/);
     const managementCyclePhotoRoute = cyclePhotoMatch && request.method === 'GET';
     if (managementRoute?.error) {
       return jsonResponse({ success: false, error: managementRoute.error.message, code: managementRoute.error.code }, 400, corsHeaders);
     }
-    if (!managementRoute && !workerLoginRoute && !managementLoginRoute && !managementAccountsRoute && !managementAccountActionRoute && !workerTasksRoute && !workerProgressRoute && !workerTaskStatusRoute && !workerMessagesRoute && !contactsRoute && !directMessagesRoute && !workerCyclesRoute && !managementCyclesRoute && !managementCyclePhotoRoute && !adminMessagesRoute && !cleanPath.startsWith('/api/models')) {
+    if (!managementRoute && !workerLoginRoute && !managementLoginRoute && !managementAccountsRoute && !managementAccountActionRoute && !workerTasksRoute && !workerProgressRoute && !workerTaskStatusRoute && !workerMessagesRoute && !contactsRoute && !directMessagesRoute && !workerCyclesRoute && !workerCyclePhotoRoute && !managementCyclesRoute && !managementCyclePhotoRoute && !adminMessagesRoute && !notificationsListRoute && !notificationReadRoute && !cleanPath.startsWith('/api/models')) {
       return jsonResponse({ success: false, error: 'المسار المطلوب غير موجود', code: 'not_found' }, 404, corsHeaders);
     }
 
     let modelIdParam = null;
     const modelsPrefix = '/api/models';
 
-    if (managementRoute || workerLoginRoute || managementLoginRoute || managementAccountsRoute || managementAccountActionRoute || workerTasksRoute || workerProgressRoute || workerTaskStatusRoute || workerMessagesRoute || contactsRoute || directMessagesRoute || workerCyclesRoute || managementCyclesRoute || managementCyclePhotoRoute || adminMessagesRoute) {
+    if (managementRoute || workerLoginRoute || managementLoginRoute || managementAccountsRoute || managementAccountActionRoute || workerTasksRoute || workerProgressRoute || workerTaskStatusRoute || workerMessagesRoute || contactsRoute || directMessagesRoute || workerCyclesRoute || workerCyclePhotoRoute || managementCyclesRoute || managementCyclePhotoRoute || adminMessagesRoute || notificationsListRoute || notificationReadRoute) {
       // Validated API routes are dispatched after authentication.
     } else if (cleanPath === modelsPrefix) {
       if (request.method !== 'GET' && request.method !== 'POST') {
@@ -177,6 +182,15 @@ export default {
       const callerUid = decodedToken.sub;
 
       const saAccessToken = await getServiceAccountAccessToken(serviceAccount);
+      if (notificationsListRoute || notificationReadRoute) {
+        if (decodedToken.role === 'worker' && decodedToken.workerId === callerUid) {
+          const workerDoc = await getFirestoreDoc(projectId, saAccessToken, `workers/${callerUid}`);
+          if (!workerDoc || convertFromFirestoreFields(workerDoc.fields || {}).status !== 'active') throw createHttpError('حسابك غير نشط', 403, 'worker_inactive');
+        } else {
+          await verifyManagementRole(callerUid, projectId, saAccessToken);
+        }
+        return await handleNotifications(request, notificationReadMatch ? safeDecodeUriSegment(notificationReadMatch[1]) : null, callerUid, projectId, saAccessToken, corsHeaders);
+      }
       if (contactsRoute || directMessagesRoute) {
         let callerRole;
         if (decodedToken.role === 'worker' && decodedToken.workerId === callerUid) {
@@ -189,7 +203,7 @@ export default {
         if (contactsRoute) return await handleListContacts(callerUid, projectId, saAccessToken, corsHeaders);
         return await handleDirectMessages(request, safeDecodeUriSegment(directMessagesMatch[1]), callerUid, callerRole, projectId, saAccessToken, corsHeaders);
       }
-      if (workerTasksRoute || workerProgressRoute || workerTaskStatusRoute || workerMessagesRoute || workerCyclesRoute) {
+      if (workerTasksRoute || workerProgressRoute || workerTaskStatusRoute || workerMessagesRoute || workerCyclesRoute || workerCyclePhotoRoute) {
         if (decodedToken.role !== 'worker' || decodedToken.workerId !== callerUid) {
           throw createHttpError('هذه الخدمة مخصصة لحساب مشرف العمال فقط', 403, 'worker_only');
         }
@@ -200,6 +214,7 @@ export default {
         if (workerTasksRoute) return await handleWorkerListTasks(callerUid, projectId, saAccessToken, corsHeaders);
         if (workerMessagesRoute) return await handleWorkerMessages(request, callerUid, projectId, saAccessToken, corsHeaders);
         if (workerCyclesRoute) return await handleWorkerCycles(request, callerUid, projectId, saAccessToken, corsHeaders);
+        if (workerCyclePhotoRoute) return await handleWorkerCyclePhoto(safeDecodeUriSegment(workerCyclePhotoMatch[1]), callerUid, projectId, saAccessToken, corsHeaders);
         if (workerTaskStatusRoute) return await handleWorkerTaskStatus(request, safeDecodeUriSegment(workerTaskStatusMatch[1]), callerUid, projectId, saAccessToken, corsHeaders);
         const taskId = safeDecodeUriSegment(workerProgressMatch[1]);
         return await handleWorkerTaskProgress(request, taskId, callerUid, projectId, saAccessToken, corsHeaders);
@@ -314,10 +329,13 @@ async function dispatchManagementRoute(request, route, callerUid, callerRole, pr
   if (route.action === 'progress') {
     return handleTaskProgress(request, route.id, callerUid, projectId, accessToken, corsHeaders);
   }
-  if (request.method === 'GET') return handleListResource(request, 'tasks', projectId, accessToken, corsHeaders);
-  if (request.method === 'POST') return handleCreateResource(request, 'tasks', callerUid, projectId, accessToken, corsHeaders);
-  if (!route.id) return handleUpdateTaskCollection(request, callerUid, projectId, accessToken, corsHeaders);
-  return handleUpdateResource(request, 'tasks', route.id, callerUid, projectId, accessToken, corsHeaders);
+  if (request.method === 'GET') return handleListResource(request, 'tasks', projectId, accessToken, corsHeaders, callerRole, callerUid);
+  if (request.method === 'POST') return handleCreateResource(request, 'tasks', callerUid, projectId, accessToken, corsHeaders, callerRole);
+  if (!route.id) {
+    if (callerRole === 'responsible') throw createHttpError('تعديل مجموعة المهام غير متاح للمسؤول؛ عدّل كل مهمة على حدة', 403, 'task_collection_update_forbidden');
+    return handleUpdateTaskCollection(request, callerUid, projectId, accessToken, corsHeaders);
+  }
+  return handleUpdateResource(request, 'tasks', route.id, callerUid, projectId, accessToken, corsHeaders, callerRole);
 }
 
 const RESOURCE_FIELDS = {
@@ -389,12 +407,16 @@ async function parseJsonBody(request, maxBytes = 64 * 1024) {
   return payload;
 }
 
-async function handleListResource(request, resource, projectId, accessToken, corsHeaders, callerRole = 'super_admin') {
+async function handleListResource(request, resource, projectId, accessToken, corsHeaders, callerRole = 'super_admin', callerUid = null) {
   const url = new URL(request.url);
   const requested = Number(url.searchParams.get('pageSize') || '50');
   const pageSize = Number.isInteger(requested) ? Math.min(Math.max(requested, 1), 100) : 50;
   const result = await listAllFirestoreDocs(projectId, accessToken, resource, 100, 500);
-  const records = result.documents.map((doc) => sanitizeResourceOutput(convertFromFirestoreFields(doc.fields || {}), resource));
+  let records = result.documents.map((doc) => sanitizeResourceOutput(convertFromFirestoreFields(doc.fields || {}), resource));
+  if (resource === 'tasks' && callerRole === 'responsible') {
+    const responsibleShift = await getResponsibleShift(callerUid, projectId, accessToken);
+    records = records.filter(task => task.shift === responsibleShift);
+  }
   const visibleRecords = resource === 'workers'
     ? records.map(worker => sanitizeWorkerOutputForRole(worker, callerRole))
     : records;
@@ -450,6 +472,7 @@ async function handleCreateResource(request, resource, callerUid, projectId, acc
   const defaults = resource === 'workers' ? { status: 'active' } : { status: 'open', completedQuantity: 0 };
   let taskDetails = {};
   if (resource === 'tasks') {
+    const responsibleShift = callerRole === 'responsible' ? await getResponsibleShift(callerUid, projectId, accessToken) : null;
     const assignedWorkerDoc = await getFirestoreDoc(projectId, accessToken, `workers/${payload.assignedWorkerId}`);
     if (!assignedWorkerDoc) throw createHttpError('العامل المحدد غير موجود', 404, 'worker_not_found');
     const assignedWorker = convertFromFirestoreFields(assignedWorkerDoc.fields || {});
@@ -458,6 +481,7 @@ async function handleCreateResource(request, resource, callerUid, projectId, acc
     if (!modelDoc) throw createHttpError('المودال المحدد غير موجود في الكتالوج', 404, 'model_not_found');
     const model = convertFromFirestoreFields(modelDoc.fields || {});
     if (![1, 2, 3].includes(assignedWorker.machineNumber) || !['day', 'night'].includes(assignedWorker.shift)) throw createHttpError('حساب مشرف العمال غير مربوط بمكينة ووردية', 409, 'worker_machine_assignment_missing');
+    if (responsibleShift && assignedWorker.shift !== responsibleShift) throw createHttpError('يمكن للمسؤول إسناد المهام إلى مشرفي العمال التابعين لورديته فقط', 403, 'responsible_shift_scope');
     taskDetails = { assignedWorkerName: assignedWorker.name, machineNumber: assignedWorker.machineNumber, shift: assignedWorker.shift, modelId: payload.modelId, modelName: model.name, modelCategory: model.category };
   }
   const record = { id, ...defaults, ...safePayload, ...taskDetails, createdBy: callerUid, createdAt: now, updatedAt: now, ...(clientMutationId ? { creationMutationId: clientMutationId, creationFingerprint: resourceCreationFingerprint(safePayload, resource) } : {}) };
@@ -491,6 +515,9 @@ async function handleCreateResource(request, resource, callerUid, projectId, acc
     }
     throw err;
   }
+  if (resource === 'tasks') {
+    await createUserNotification(record.assignedWorkerId, 'task_assigned', 'أمر إنتاج جديد', `تم إسناد ${record.title} إليك بكمية ${record.targetQuantity}.`, record.id, projectId, accessToken);
+  }
   const responseRecord = resource === 'workers' ? sanitizeWorkerOutputForRole(record, callerRole) : record;
   return jsonResponse({ success: true, [resource === 'workers' ? 'worker' : 'task']: responseRecord }, 201, corsHeaders);
 }
@@ -504,6 +531,8 @@ async function handleUpdateResource(request, resource, id, callerUid, projectId,
   if (!currentDoc) throw createHttpError('المورد المطلوب غير موجود', 404, 'resource_not_found');
   const current = convertFromFirestoreFields(currentDoc.fields || {});
   const changes = { ...payload };
+  const responsibleShift = resource === 'tasks' && callerRole === 'responsible' ? await getResponsibleShift(callerUid, projectId, accessToken) : null;
+  if (responsibleShift && current.shift !== responsibleShift) throw createHttpError('لا يمكنك تعديل مهمة خارج نطاق ورديتك', 403, 'responsible_shift_scope');
 
   if (resource === 'workers' && changes.name !== undefined && (changes.status ?? current.status) === 'active') {
     const existingWorkers = await listAllFirestoreDocs(projectId, accessToken, 'workers', 100, 500);
@@ -538,6 +567,7 @@ async function handleUpdateResource(request, resource, id, callerUid, projectId,
       if (!assignedWorkerDoc) throw createHttpError('العامل المحدد غير موجود', 404, 'worker_not_found');
       const assignedWorker = convertFromFirestoreFields(assignedWorkerDoc.fields || {});
       if (assignedWorker.status !== 'active') throw createHttpError('لا يمكن إسناد المهمة إلى عامل غير نشط', 409, 'worker_inactive');
+      if (responsibleShift && assignedWorker.shift !== responsibleShift) throw createHttpError('يمكن للمسؤول إسناد المهام إلى مشرفي العمال التابعين لورديته فقط', 403, 'responsible_shift_scope');
       if (![1, 2, 3].includes(assignedWorker.machineNumber) || !['day', 'night'].includes(assignedWorker.shift)) throw createHttpError('حساب مشرف العمال غير مربوط بمكينة ووردية', 409, 'worker_machine_assignment_missing');
       changes.assignedWorkerName = assignedWorker.name;
       changes.machineNumber = assignedWorker.machineNumber;
@@ -588,6 +618,18 @@ async function handleUpdateResource(request, resource, id, callerUid, projectId,
     }
   }
   await commitFirestoreTransaction(projectId, accessToken, null, writes);
+  if (resource === 'tasks') {
+    const previousWorkerId = current.assignedWorkerId;
+    const nextWorkerId = record.assignedWorkerId;
+    if (nextWorkerId && nextWorkerId !== previousWorkerId) {
+      await createUserNotification(nextWorkerId, 'task_assigned', 'أمر إنتاج جديد', `تم إسناد ${record.title} إليك بكمية ${record.targetQuantity}.`, id, projectId, accessToken);
+      if (previousWorkerId) {
+        await createUserNotification(previousWorkerId, 'task_reassigned', 'تغيير إسناد أمر الإنتاج', `تم نقل أمر الإنتاج ${current.title || ''} إلى عامل آخر.`, id, projectId, accessToken);
+      }
+    } else if (nextWorkerId && ['title', 'description', 'targetQuantity', 'dueDate', 'modelId', 'status'].some(key => changes[key] !== undefined && changes[key] !== current[key])) {
+      await createUserNotification(nextWorkerId, 'task_updated', 'تم تحديث أمر الإنتاج', `تم تحديث بيانات ${record.title || 'أمر الإنتاج'}. الكمية المطلوبة: ${record.targetQuantity}.`, id, projectId, accessToken);
+    }
+  }
   const responseRecord = resource === 'workers' ? sanitizeWorkerOutputForRole(record, callerRole) : sanitizeResourceOutput(record, resource);
   return jsonResponse({ success: true, [resource === 'workers' ? 'worker' : 'task']: responseRecord }, 200, corsHeaders);
 }
@@ -693,8 +735,18 @@ export function assertWorkerManagementPermission(role, method, action = null) {
 
 /** @param {string} role */
 export function assertTaskManagementPermission(role) {
-  if (role === 'super_admin' || role === 'admin') return true;
-  throw createHttpError('إدارة مهام الإنتاج من صلاحيات المدير العام والمشرف العام فقط', 403, 'task_management_forbidden');
+  if (role === 'super_admin' || role === 'admin' || role === 'responsible') return true;
+  throw createHttpError('لا تملك صلاحية إدارة أوامر الإنتاج', 403, 'task_management_forbidden');
+}
+
+async function getResponsibleShift(callerUid, projectId, accessToken) {
+  const userDoc = await getFirestoreDoc(projectId, accessToken, `users/${callerUid}`);
+  if (!userDoc) throw createHttpError('ملف المسؤول غير موجود', 403, 'responsible_profile_missing');
+  const profile = convertFromFirestoreFields(userDoc.fields || {});
+  if (profile.role !== 'responsible' || profile.status !== 'active' || !['day', 'night'].includes(profile.shift)) {
+    throw createHttpError('حساب المسؤول غير مربوط بورديّة صحيحة؛ راجع المشرف العام', 403, 'responsible_shift_missing');
+  }
+  return profile.shift;
 }
 
 export function assertSuperAdminManagementAccountsPermission(role) {
@@ -1200,6 +1252,80 @@ async function handleListContacts(callerUid, projectId, accessToken, corsHeaders
   return jsonResponse({ success: true, data: contacts }, 200, corsHeaders);
 }
 
+async function createUserNotification(recipientUid, type, title, body, relatedId, projectId, accessToken, relatedUserId = '') {
+  if (typeof recipientUid !== 'string' || !/^[A-Za-z0-9_-]{3,128}$/.test(recipientUid)) return false;
+  const id = `ntf_${crypto.randomUUID().replace(/-/g, '')}`;
+  const record = {
+    id, recipientUid, type: String(type).slice(0, 40),
+    title: String(title).slice(0, 120), body: String(body).slice(0, 500),
+    relatedId: String(relatedId || '').slice(0, 128),
+    relatedUserId: typeof relatedUserId === 'string' ? relatedUserId.slice(0, 128) : '',
+    createdAt: new Date().toISOString(), readAt: null
+  };
+  try {
+    await commitFirestoreTransaction(projectId, accessToken, null, [{
+      update: { name: `projects/${projectId}/databases/(default)/documents/notifications/${id}`, fields: convertToFirestoreFields(record) },
+      currentDocument: { exists: false }
+    }]);
+    return true;
+  } catch (err) {
+    // Notification failure must never roll back or make a committed business action appear failed.
+    console.error('[Notification write failed]', { recipientUid, type, error: err?.message });
+    return false;
+  }
+}
+
+export function buildNotificationQuery(recipientUid) {
+  if (typeof recipientUid !== 'string' || !/^[A-Za-z0-9_-]{3,128}$/.test(recipientUid)) {
+    throw createHttpError('معرّف مستلم الإشعار غير صالح', 400, 'invalid_notification_recipient');
+  }
+  return {
+    structuredQuery: {
+      from: [{ collectionId: 'notifications' }],
+      where: {
+        fieldFilter: {
+          field: { fieldPath: 'recipientUid' },
+          op: 'EQUAL',
+          value: { stringValue: recipientUid }
+        }
+      },
+      limit: 200
+    }
+  };
+}
+
+async function handleNotifications(request, notificationId, callerUid, projectId, accessToken, corsHeaders) {
+  if (!notificationId) {
+    const url = `${FIRESTORE_BASE_URL}/${projectId}/databases/(default)/documents:runQuery`;
+    const response = await fetch(url, {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${accessToken}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify(buildNotificationQuery(callerUid))
+    });
+    if (!response.ok) throw createHttpError('تعذر تحميل الإشعارات', 500, 'notifications_read_failed');
+    const rows = await response.json();
+    const data = rows.filter(row => row.document).map(row => convertFromFirestoreFields(row.document.fields || {}))
+      .filter(item => item.recipientUid === callerUid)
+      .sort((a, b) => String(b.createdAt || '').localeCompare(String(a.createdAt || '')))
+      .slice(0, 50);
+    return jsonResponse({ success: true, data }, 200, corsHeaders);
+  }
+  if (!/^ntf_[a-f0-9]{32}$/.test(notificationId)) throw createHttpError('معرّف الإشعار غير صالح', 400, 'invalid_notification_id');
+  const path = `notifications/${notificationId}`;
+  const doc = await getFirestoreDoc(projectId, accessToken, path);
+  if (!doc) throw createHttpError('الإشعار غير موجود', 404, 'notification_not_found');
+  const record = convertFromFirestoreFields(doc.fields || {});
+  if (record.recipientUid !== callerUid) throw createHttpError('لا تملك صلاحية تعديل هذا الإشعار', 403, 'notification_forbidden');
+  if (!record.readAt) {
+    record.readAt = new Date().toISOString();
+    await commitFirestoreTransaction(projectId, accessToken, null, [{
+      update: { name: `projects/${projectId}/databases/(default)/documents/${path}`, fields: convertToFirestoreFields(record) },
+      currentDocument: { updateTime: doc.updateTime }
+    }]);
+  }
+  return jsonResponse({ success: true, data: record }, 200, corsHeaders);
+}
+
 async function readDirectConversation(conversationId, uidA, uidB, projectId, accessToken) {
   const url = `${FIRESTORE_BASE_URL}/${projectId}/databases/(default)/documents:runQuery`;
   const response = await fetch(url, {
@@ -1269,6 +1395,7 @@ async function handleDirectMessages(request, otherUid, callerUid, callerRole, pr
   conversationWrite.currentDocument = conversationDoc?.updateTime ? { updateTime: conversationDoc.updateTime } : { exists: false };
   const messageWrite = { update: { name: `projects/${projectId}/databases/(default)/documents/messages/${messageId}`, fields: convertToFirestoreFields(message) }, currentDocument: { exists: false } };
   await commitFirestoreTransaction(projectId, accessToken, null, [conversationWrite, messageWrite]);
+  await createUserNotification(otherUid, 'direct_message', 'رسالة جديدة', `رسالة جديدة من ${sender.displayName}.`, messageId, projectId, accessToken, callerUid);
   return jsonResponse({ success: true, data: message }, 201, corsHeaders);
 }
 
@@ -1387,6 +1514,16 @@ async function handleWorkerCycles(request, workerId, projectId, accessToken, cor
 }
 
 
+async function handleWorkerCyclePhoto(id, workerId, projectId, accessToken, corsHeaders) {
+  if (!/^mc_[0-9]{8}_[123]_(?:day|night)$/.test(id)) throw createHttpError('معرّف تقرير الدورات غير صالح', 400, 'invalid_cycle_id');
+  const doc = await getFirestoreDoc(projectId, accessToken, `machine_cycles/${id}`);
+  if (!doc) throw createHttpError('تقرير الدورات غير موجود', 404, 'cycle_report_not_found');
+  const record = convertFromFirestoreFields(doc.fields || {});
+  if (record.workerId !== workerId) throw createHttpError('لا يمكنك عرض صورة تقرير عامل آخر', 403, 'cycle_photo_forbidden');
+  if (typeof record.photo !== 'string' || !record.photo.startsWith('data:image/')) throw createHttpError('صورة العداد غير متوفرة في التقرير المحفوظ', 404, 'cycle_photo_not_found');
+  return jsonResponse({ success: true, data: { id, photo: record.photo } }, 200, corsHeaders);
+}
+
 async function handleCyclePhoto(id, projectId, accessToken, corsHeaders) {
   if (!/^mc_[0-9]{8}_[123]_(?:day|night)$/.test(id)) throw createHttpError('معرّف تقرير الدورات غير صالح', 400, 'invalid_cycle_id');
   const doc = await getFirestoreDoc(projectId, accessToken, `machine_cycles/${id}`);
@@ -1403,7 +1540,7 @@ async function handleListCycles(request, projectId, accessToken, corsHeaders) {
   const pageToken = url.searchParams.get('pageToken') || null;
   // Fetch a bounded page, newest machine-cycle reports first. The client can
   // request older pages without loading an ever-growing collection at once.
-  const result = await listFirestoreDocs(projectId, accessToken, 'machine_cycles', pageSize, pageToken, '__name__ desc', ['id', 'machineNumber', 'shift', 'date', 'count', 'workerId', 'workerName', 'recordedAt', 'receivedAt', 'hasPhoto']);
+  const result = await listFirestoreDocs(projectId, accessToken, 'machine_cycles', pageSize, pageToken, null, ['id', 'machineNumber', 'shift', 'date', 'count', 'workerId', 'workerName', 'recordedAt', 'receivedAt', 'hasPhoto']);
   const data = result.documents.map(doc => convertFromFirestoreFields(doc.fields || {}))
     .sort((a, b) => String(b.recordedAt || '').localeCompare(String(a.recordedAt || '')))
     .map(report => ({ ...report, hasPhoto: report.hasPhoto !== false }));
@@ -1450,6 +1587,11 @@ async function handleWorkerTaskStatus(request, taskId, workerId, projectId, acce
     },
     currentDocument: { updateTime: taskDoc.updateTime }
   }]);
+  if (task.createdBy && task.createdBy !== workerId) {
+    const worker = convertFromFirestoreFields(workerDoc.fields || {});
+    const statusLabel = payload.status === 'pending' ? 'بتعليق' : 'باستئناف';
+    await createUserNotification(task.createdBy, 'task_status', 'تحديث حالة أمر الإنتاج', `قام ${worker.name || 'العامل'} ${statusLabel} المهمة ${task.title || ''}.`, taskId, projectId, accessToken);
+  }
   return jsonResponse({ success: true, task: sanitizeResourceOutput(record, 'tasks') }, 200, corsHeaders);
 }
 
@@ -1585,6 +1727,9 @@ async function handleTaskProgress(request, taskId, callerUid, projectId, accessT
     const latestRecord = convertFromFirestoreFields(latestDoc.fields || {});
     if (expectedWorkerId && latestRecord.assignedWorkerId !== expectedWorkerId) throw createHttpError('لا يمكنك الاطلاع على مهمة غير مسندة إليك', 403, 'task_not_assigned');
     return jsonResponse({ success: true, task: sanitizeResourceOutput(latestRecord, 'tasks'), duplicate: true }, 200, corsHeaders);
+  }
+  if (record.createdBy && record.createdBy !== callerUid) {
+    await createUserNotification(record.createdBy, 'task_progress', 'تحديث أمر الإنتاج', `سُجّل إنجاز ${payload.quantity} قطعة من ${record.title || 'أمر الإنتاج'}، والإجمالي ${record.completedQuantity} من ${record.targetQuantity}.`, taskId, projectId, accessToken);
   }
   return jsonResponse({ success: true, task: sanitizeResourceOutput(record, 'tasks'), duplicate: false }, 200, corsHeaders);
 }
@@ -2673,8 +2818,11 @@ async function listFirestoreDocs(projectId, accessToken, collection, pageSize, p
     const providerMessage = String(data?.error?.message || responseText || 'No provider details').slice(0, 500);
     console.error('[Firestore collection read failed]', { collection, httpStatus: resp.status, providerCode, providerMessage });
     const isPermissionError = resp.status === 401 || resp.status === 403;
+    const safeProviderDetail = collection === 'machine_cycles'
+      ? ` — تفاصيل Firestore: ${providerMessage}`
+      : '';
     throw createHttpError(
-      `فشل قراءة قائمة الموديلات من Firestore (HTTP ${resp.status} - ${providerCode})`,
+      `فشل قراءة بيانات المجموعة ${collection} من Firestore (HTTP ${resp.status} - ${providerCode})${safeProviderDetail}`,
       isPermissionError ? 403 : 500,
       `collection_read_failed_${providerCode.toLowerCase()}`
     );
@@ -2771,8 +2919,13 @@ export function getAllowedOrigins(env) {
 
 export function isOriginAllowed(origin, env) {
   if (!origin) return false;
+  const normalizedOrigin = origin.trim().replace(/\/+$/, '');
   const allowed = getAllowedOrigins(env);
-  return allowed.has(origin.trim().replace(/\/+$/, ''));
+  if (allowed.has(normalizedOrigin)) return true;
+
+  // Allow only single-label Cloudflare Pages previews for this exact project.
+  // This keeps unrelated domains and other Pages projects blocked by CORS.
+  return /^https:\/\/[a-z0-9-]+\.fc-founoun\.pages\.dev$/i.test(normalizedOrigin);
 }
 
 export function getCorsHeaders(origin, isAllowed) {
