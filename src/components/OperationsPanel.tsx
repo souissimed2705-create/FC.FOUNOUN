@@ -2,6 +2,7 @@ import React, { useEffect, useState } from 'react';
 import { MessageCircle, Gauge } from 'lucide-react';
 import { createTask, createWorker, flushQueuedMutations, listTasks, listWorkers, queuedMutationCount, recordProgress, setWorkerPin, updateTask, updateWorker, listMachineCycles, getMachineCyclePhoto } from '../lib/operationsApi';
 import { PrivateMessagesPanel } from './PrivateMessagesPanel';
+import { CycleReportPhoto } from './CycleReportPhoto';
 import { listShoeModels } from '../lib/modelsApi';
 import { readOfflineSnapshot, saveOfflineSnapshot } from '../utils/offlineCache';
 import type { ShoeModel } from '../types/models';
@@ -78,7 +79,7 @@ export const OperationsPanel: React.FC<Props> = ({ initialSection, admin, focusT
     setError(null);
     const [workersResult, tasksResult, modelsResult, cyclesResult] = await Promise.allSettled([
       listWorkers(),
-      isResponsible ? Promise.resolve({ data: [] as TaskRecord[] }) : listTasks(),
+      listTasks(),
       // Keep the same page size used by the working Models screen.
       listShoeModels({ pageSize: 50 }),
       listMachineCycles()
@@ -213,6 +214,7 @@ export const OperationsPanel: React.FC<Props> = ({ initialSection, admin, focusT
     }
     const selectedWorker = workers.find(worker => worker.id === assignedWorkerId);
     if (!selectedWorker?.machineNumber || !selectedWorker.shift) { setError('يجب ربط مشرف العمال بمكينة ووردية قبل إسناد أمر الإنتاج.'); return; }
+    if (isResponsible && admin.shift && selectedWorker.shift !== admin.shift) { setError('يمكنك إسناد المهام إلى مشرفي العمال التابعين لورديتك فقط.'); return; }
     const payload = { title: 'إنتاج مودال ' + model.name, description: description.trim(), modelId: model.id, modelName: model.name, modelCategory: model.category, assignedWorkerId, targetQuantity: qty };
     if (editingTaskId) {
       const task = tasks.find(item => item.id === editingTaskId);
@@ -241,7 +243,7 @@ export const OperationsPanel: React.FC<Props> = ({ initialSection, admin, focusT
   }[status]);
   const tabs: { id: Section; label: string }[] = [
     ...(canManageWorkers ? [{ id: 'workers' as const, label: 'إدارة مشرفي العمال' }] : []),
-    ...(!isResponsible ? [{ id: 'tasks' as const, label: 'أوامر الإنتاج' }] : []),
+    { id: 'tasks' as const, label: 'أوامر الإنتاج' },
     { id: 'cycles', label: 'عدد دورات المكائن' },
     { id: 'messages', label: 'المحادثة' },
   ];
@@ -300,7 +302,7 @@ export const OperationsPanel: React.FC<Props> = ({ initialSection, admin, focusT
           </select>
           <select className="field" value={assignedWorkerId} onChange={e => setAssignedWorkerId(e.target.value)}>
             <option value="">اختر العامل</option>
-            {workers.filter(w => w.status === 'active').map(w => <option key={w.id} value={w.id}>{w.name} — مكينة {w.machineNumber ?? '?'} — {w.shift === 'day' ? 'نهار' : w.shift === 'night' ? 'ليل' : 'غير محدد'}</option>)}
+            {workers.filter(w => w.status === 'active' && (!isResponsible || !admin.shift || w.shift === admin.shift)).map(w => <option key={w.id} value={w.id}>{w.name} — مكينة {w.machineNumber ?? '?'} — {w.shift === 'day' ? 'نهار' : w.shift === 'night' ? 'ليل' : 'غير محدد'}</option>)}
           </select>
           <input className="field" type="number" min="1" step="1" placeholder="الكمية المطلوبة" value={targetQuantity} onChange={e => setTargetQuantity(e.target.value)} />
           <input className="field" placeholder="ملاحظة أو تعليمات (اختياري)" value={description} onChange={e => setDescription(e.target.value)} />
@@ -338,7 +340,7 @@ export const OperationsPanel: React.FC<Props> = ({ initialSection, admin, focusT
       </div>
       <p className="text-xs text-gray-500">عدد التقارير المعروضة: {filteredCycles.length}{cycleNextPageToken ? ' · توجد تقارير أقدم' : ''}</p>
       {!filteredCycles.length && <p className="rounded-xl border border-white/10 bg-[#080808] p-6 text-center text-sm text-gray-500">لا توجد تقارير تطابق عوامل التصفية في الصفحات المحمّلة.</p>}
-      {filteredCycles.map(report => <article key={report.id} className="rounded-xl border border-white/10 bg-[#080808] p-3"><div className="flex flex-wrap items-center justify-between gap-2"><b>المكينة {report.machineNumber} · {report.shift === 'day' ? 'النهار' : 'الليل'}</b><strong className="text-[#F5D77F]">{report.count.toLocaleString('ar-TN')} دورة</strong></div><p className="mt-1 text-xs text-gray-400">{report.date}{report.recordedAt ? ` · ${new Date(report.recordedAt).toLocaleString('ar-TN', { timeZone: 'Africa/Tunis' })}` : ''} · {report.workerName}</p><p className="mt-1 text-xs text-gray-500">{report.hasPhoto ? <button className="secondary-button mt-2" onClick={async () => { try { const result = await getMachineCyclePhoto(report.id); setSelectedCyclePhoto(result.data); } catch (e) { setError(e instanceof Error ? e.message : 'تعذر عرض صورة العداد.'); } }}>عرض صورة العداد</button> : 'لا توجد صورة مرفقة'}</p></article>)}
+      {filteredCycles.map(report => <article key={report.id} className="rounded-xl border border-white/10 bg-[#080808] p-3"><div className="flex flex-wrap items-center justify-between gap-2"><b>المكينة {report.machineNumber} · {report.shift === 'day' ? 'النهار' : 'الليل'}</b><strong className="text-[#F5D77F]">{report.count.toLocaleString('ar-TN')} دورة</strong></div><p className="mt-1 text-xs text-gray-400">{report.date}{report.recordedAt ? ` · ${new Date(report.recordedAt).toLocaleString('ar-TN', { timeZone: 'Africa/Tunis' })}` : ''} · {report.workerName}</p><p className="mt-1 text-xs text-gray-500">{report.hasPhoto ? <CycleReportPhoto reportId={report.id} loadPhoto={getMachineCyclePhoto} onOpen={setSelectedCyclePhoto} /> : <p className="mt-2 text-xs text-gray-500">لا توجد صورة مرفقة</p>}</p></article>)}
       {cycleNextPageToken && <button className="secondary-button w-full" disabled={loadingMoreCycles} onClick={() => void loadMoreCycles()}>{loadingMoreCycles ? 'جارٍ تحميل التقارير...' : 'تحميل التقارير الأقدم'}</button>}
     </div>}
 
