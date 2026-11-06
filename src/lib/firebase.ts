@@ -10,7 +10,9 @@ import { getMissingFirebaseConfig } from '../utils/firebaseConfig';
  * NOTE: Only public client parameters are used.
  * No Firebase Admin SDK, private service account keys, or secrets are exposed in the client code.
  */
-const rawApiKey = (import.meta.env.VITE_FIREBASE_API_KEY || '').trim();
+// Firebase Web API key from the official FC-FOUNOUN-WEB app configuration.
+// This is a public client identifier, not a server-side secret.
+const rawApiKey = 'AIzaSyDOBegB2Z2T3rYoHtU4K2QnHdft6kguzRA';
 
 const firebaseConfig = {
   apiKey: rawApiKey,
