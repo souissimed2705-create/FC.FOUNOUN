@@ -5,6 +5,7 @@ on:
     branches:
       - fix/full-project-repair
       - fix/operations-contracts-rbac
+      - fix/cloudflare-bun-lockfile
       - main
   push:
     branches:
