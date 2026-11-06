@@ -12,6 +12,7 @@ on:
       - fix/operations-contracts
       - fix/operations-contracts-rbac
       - fix/pbkdf2-firestore-diagnostics
+      - fix/notification-click-navigation
 
 permissions:
   contents: read
