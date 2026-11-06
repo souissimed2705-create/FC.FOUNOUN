@@ -9,10 +9,10 @@ import { optimizeAndEncodeImage } from '../utils/imageOptimizer';
 import { readOfflineSnapshot, saveOfflineSnapshot } from '../utils/offlineCache';
 import type { TaskRecord, MachineCycleRecord } from '../types/operations';
 
-interface Props { worker: { id: string; name: string }; }
+interface Props { worker: { id: string; name: string }; notificationTaskRequest?: { id: string; nonce: number } | null; }
 type Page = 'home' | 'models' | 'tasks' | 'messages' | 'cycles';
 
-export const WorkerDashboard: React.FC<Props> = ({ worker }) => {
+export const WorkerDashboard: React.FC<Props> = ({ worker, notificationTaskRequest }) => {
   const [page, setPage] = useState<Page>('home');
   useEffect(() => {
     window.history.pushState({ fcFounounPage: 'worker', page: 'home' }, '');
@@ -23,6 +23,15 @@ export const WorkerDashboard: React.FC<Props> = ({ worker }) => {
     window.addEventListener('popstate', handleBack);
     return () => window.removeEventListener('popstate', handleBack);
   }, []);
+  useEffect(() => {
+    if (!notificationTaskRequest) return;
+    window.history.pushState({ fcFounounPage: 'worker', page: 'tasks' }, '');
+    setPage('tasks');
+  }, [notificationTaskRequest?.nonce]);
+  useEffect(() => {
+    if (page !== 'tasks' || !notificationTaskRequest?.id || !tasks.length) return;
+    document.getElementById(`worker-task-${notificationTaskRequest.id}`)?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+  }, [page, tasks, notificationTaskRequest?.nonce]);
   const navigatePage = (next: Page) => {
     window.history.pushState({ fcFounounPage: 'worker', page: next }, '');
     setPage(next);
@@ -226,7 +235,7 @@ export const WorkerDashboard: React.FC<Props> = ({ worker }) => {
     {page === 'tasks' && <div className="rounded-2xl border border-white/10 bg-[#111] p-4 space-y-4">
       <div className="flex items-center justify-between"><h3 className="font-bold text-[#F5D77F]">أوامر الإنتاج المسندة إليك</h3><button className="secondary-button" onClick={() => void refresh()}><RefreshCw className="w-4 h-4" /> تحديث</button></div>
       {!tasks.length && <p className="py-6 text-center text-sm text-gray-400">لا توجد أوامر إنتاج مسندة إليك حالياً.</p>}
-      <div className="space-y-3">{tasks.map(task => <article key={task.id} className="rounded-xl border border-white/10 bg-[#080808] p-4 space-y-2">
+      <div className="space-y-3">{tasks.map(task => <article id={`worker-task-${task.id}`} key={task.id} className="rounded-xl border border-white/10 bg-[#080808] p-4 space-y-2">
         <div className="flex items-center justify-between gap-2"><div><h3 className="font-bold">{task.modelName || task.title}</h3>{task.modelCategory && <p className="text-xs text-[#D4AF37]">{task.modelCategory}</p>}</div><span className="text-xs text-[#F5D77F]">{statusLabel(task.status)}</span></div>
         {task.description && <p className="text-sm text-gray-400">{task.description}</p>}
         <p className="text-sm text-gray-400">المطلوب: {task.targetQuantity} · المنجز: {task.completedQuantity} · المتبقي: {Math.max(0, task.targetQuantity - task.completedQuantity)}</p>
