@@ -6,10 +6,10 @@ import { OperationsPanel } from './OperationsPanel';
 import { ManagementAccountsPanel } from './ManagementAccountsPanel';
 import { PrivateMessagesPanel } from './PrivateMessagesPanel';
 
-interface AdminDashboardProps { admin: UserProfile; onLogout: () => Promise<void>; isLoggingOut: boolean; }
+interface AdminDashboardProps { admin: UserProfile; onLogout: () => Promise<void>; isLoggingOut: boolean; notificationTaskRequest?: { id: string; nonce: number } | null; }
 type Page = 'home' | 'models' | 'tasks' | 'supervisor' | 'workers' | 'accounts' | 'messages';
 
-export const AdminDashboard: React.FC<AdminDashboardProps> = ({ admin, onLogout, isLoggingOut }) => {
+export const AdminDashboard: React.FC<AdminDashboardProps> = ({ admin, onLogout, isLoggingOut, notificationTaskRequest }) => {
   const [page, setPage] = useState<Page>('home');
   useEffect(() => {
     window.history.pushState({ fcFounounPage: 'admin', page: 'home' }, '');
@@ -20,6 +20,11 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ admin, onLogout,
     window.addEventListener('popstate', handleBack);
     return () => window.removeEventListener('popstate', handleBack);
   }, []);
+  useEffect(() => {
+    if (!notificationTaskRequest) return;
+    window.history.pushState({ fcFounounPage: 'admin', page: 'tasks' }, '');
+    setPage('tasks');
+  }, [notificationTaskRequest?.nonce]);
   const isSupervisor = admin.role === 'super_admin';
   const canManageWorkers = ['super_admin', 'admin', 'responsible'].includes(admin.role);
   const roleName = isSupervisor ? 'المشرف العام' : admin.role === 'responsible' ? 'المسؤول' : 'المدير العام';
@@ -93,7 +98,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ admin, onLogout,
     </>}
 
     {page === 'models' && <ModelsPanel readOnly={false} />}
-    {page === 'tasks' && admin.role !== 'responsible' && <OperationsPanel initialSection="tasks" admin={admin} />}
+    {page === 'tasks' && admin.role !== 'responsible' && <OperationsPanel initialSection="tasks" admin={admin} focusTaskId={notificationTaskRequest?.id} />}
     {page === 'supervisor' && isSupervisor && <section className="space-y-3 rounded-2xl border border-[#D4AF37]/25 bg-[#111] p-4">
       <div><h3 className="font-bold text-[#F5D77F]">أدوات المشرف</h3><p className="mt-1 text-xs leading-6 text-gray-400">هذه الصفحة خاصة بحساب المشرف، ولا تظهر للمسؤول أو العامل.</p></div>
       <button onClick={() => go('workers')} className="flex w-full items-center gap-3 rounded-xl border border-white/10 bg-[#090909] p-4 text-right hover:border-[#D4AF37]/60">
