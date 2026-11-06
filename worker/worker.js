@@ -329,10 +329,13 @@ async function dispatchManagementRoute(request, route, callerUid, callerRole, pr
   if (route.action === 'progress') {
     return handleTaskProgress(request, route.id, callerUid, projectId, accessToken, corsHeaders);
   }
-  if (request.method === 'GET') return handleListResource(request, 'tasks', projectId, accessToken, corsHeaders);
-  if (request.method === 'POST') return handleCreateResource(request, 'tasks', callerUid, projectId, accessToken, corsHeaders);
-  if (!route.id) return handleUpdateTaskCollection(request, callerUid, projectId, accessToken, corsHeaders);
-  return handleUpdateResource(request, 'tasks', route.id, callerUid, projectId, accessToken, corsHeaders);
+  if (request.method === 'GET') return handleListResource(request, 'tasks', projectId, accessToken, corsHeaders, callerRole, callerUid);
+  if (request.method === 'POST') return handleCreateResource(request, 'tasks', callerUid, projectId, accessToken, corsHeaders, callerRole);
+  if (!route.id) {
+    if (callerRole === 'responsible') throw createHttpError('تعديل مجموعة المهام غير متاح للمسؤول؛ عدّل كل مهمة على حدة', 403, 'task_collection_update_forbidden');
+    return handleUpdateTaskCollection(request, callerUid, projectId, accessToken, corsHeaders);
+  }
+  return handleUpdateResource(request, 'tasks', route.id, callerUid, projectId, accessToken, corsHeaders, callerRole);
 }
 
 const RESOURCE_FIELDS = {
@@ -404,12 +407,16 @@ async function parseJsonBody(request, maxBytes = 64 * 1024) {
   return payload;
 }
 
-async function handleListResource(request, resource, projectId, accessToken, corsHeaders, callerRole = 'super_admin') {
+async function handleListResource(request, resource, projectId, accessToken, corsHeaders, callerRole = 'super_admin', callerUid = null) {
   const url = new URL(request.url);
   const requested = Number(url.searchParams.get('pageSize') || '50');
   const pageSize = Number.isInteger(requested) ? Math.min(Math.max(requested, 1), 100) : 50;
   const result = await listAllFirestoreDocs(projectId, accessToken, resource, 100, 500);
-  const records = result.documents.map((doc) => sanitizeResourceOutput(convertFromFirestoreFields(doc.fields || {}), resource));
+  let records = result.documents.map((doc) => sanitizeResourceOutput(convertFromFirestoreFields(doc.fields || {}), resource));
+  if (resource === 'tasks' && callerRole === 'responsible') {
+    const responsibleShift = await getResponsibleShift(callerUid, projectId, accessToken);
+    records = records.filter(task => task.shift === responsibleShift);
+  }
   const visibleRecords = resource === 'workers'
     ? records.map(worker => sanitizeWorkerOutputForRole(worker, callerRole))
     : records;
@@ -465,6 +472,7 @@ async function handleCreateResource(request, resource, callerUid, projectId, acc
   const defaults = resource === 'workers' ? { status: 'active' } : { status: 'open', completedQuantity: 0 };
   let taskDetails = {};
   if (resource === 'tasks') {
+    const responsibleShift = callerRole === 'responsible' ? await getResponsibleShift(callerUid, projectId, accessToken) : null;
     const assignedWorkerDoc = await getFirestoreDoc(projectId, accessToken, `workers/${payload.assignedWorkerId}`);
     if (!assignedWorkerDoc) throw createHttpError('العامل المحدد غير موجود', 404, 'worker_not_found');
     const assignedWorker = convertFromFirestoreFields(assignedWorkerDoc.fields || {});
@@ -473,6 +481,7 @@ async function handleCreateResource(request, resource, callerUid, projectId, acc
     if (!modelDoc) throw createHttpError('المودال المحدد غير موجود في الكتالوج', 404, 'model_not_found');
     const model = convertFromFirestoreFields(modelDoc.fields || {});
     if (![1, 2, 3].includes(assignedWorker.machineNumber) || !['day', 'night'].includes(assignedWorker.shift)) throw createHttpError('حساب مشرف العمال غير مربوط بمكينة ووردية', 409, 'worker_machine_assignment_missing');
+    if (responsibleShift && assignedWorker.shift !== responsibleShift) throw createHttpError('يمكن للمسؤول إسناد المهام إلى مشرفي العمال التابعين لورديته فقط', 403, 'responsible_shift_scope');
     taskDetails = { assignedWorkerName: assignedWorker.name, machineNumber: assignedWorker.machineNumber, shift: assignedWorker.shift, modelId: payload.modelId, modelName: model.name, modelCategory: model.category };
   }
   const record = { id, ...defaults, ...safePayload, ...taskDetails, createdBy: callerUid, createdAt: now, updatedAt: now, ...(clientMutationId ? { creationMutationId: clientMutationId, creationFingerprint: resourceCreationFingerprint(safePayload, resource) } : {}) };
@@ -522,6 +531,8 @@ async function handleUpdateResource(request, resource, id, callerUid, projectId,
   if (!currentDoc) throw createHttpError('المورد المطلوب غير موجود', 404, 'resource_not_found');
   const current = convertFromFirestoreFields(currentDoc.fields || {});
   const changes = { ...payload };
+  const responsibleShift = resource === 'tasks' && callerRole === 'responsible' ? await getResponsibleShift(callerUid, projectId, accessToken) : null;
+  if (responsibleShift && current.shift !== responsibleShift) throw createHttpError('لا يمكنك تعديل مهمة خارج نطاق ورديتك', 403, 'responsible_shift_scope');
 
   if (resource === 'workers' && changes.name !== undefined && (changes.status ?? current.status) === 'active') {
     const existingWorkers = await listAllFirestoreDocs(projectId, accessToken, 'workers', 100, 500);
@@ -556,6 +567,7 @@ async function handleUpdateResource(request, resource, id, callerUid, projectId,
       if (!assignedWorkerDoc) throw createHttpError('العامل المحدد غير موجود', 404, 'worker_not_found');
       const assignedWorker = convertFromFirestoreFields(assignedWorkerDoc.fields || {});
       if (assignedWorker.status !== 'active') throw createHttpError('لا يمكن إسناد المهمة إلى عامل غير نشط', 409, 'worker_inactive');
+      if (responsibleShift && assignedWorker.shift !== responsibleShift) throw createHttpError('يمكن للمسؤول إسناد المهام إلى مشرفي العمال التابعين لورديته فقط', 403, 'responsible_shift_scope');
       if (![1, 2, 3].includes(assignedWorker.machineNumber) || !['day', 'night'].includes(assignedWorker.shift)) throw createHttpError('حساب مشرف العمال غير مربوط بمكينة ووردية', 409, 'worker_machine_assignment_missing');
       changes.assignedWorkerName = assignedWorker.name;
       changes.machineNumber = assignedWorker.machineNumber;
@@ -723,8 +735,18 @@ export function assertWorkerManagementPermission(role, method, action = null) {
 
 /** @param {string} role */
 export function assertTaskManagementPermission(role) {
-  if (role === 'super_admin' || role === 'admin') return true;
-  throw createHttpError('إدارة مهام الإنتاج من صلاحيات المدير العام والمشرف العام فقط', 403, 'task_management_forbidden');
+  if (role === 'super_admin' || role === 'admin' || role === 'responsible') return true;
+  throw createHttpError('لا تملك صلاحية إدارة أوامر الإنتاج', 403, 'task_management_forbidden');
+}
+
+async function getResponsibleShift(callerUid, projectId, accessToken) {
+  const userDoc = await getFirestoreDoc(projectId, accessToken, `users/${callerUid}`);
+  if (!userDoc) throw createHttpError('ملف المسؤول غير موجود', 403, 'responsible_profile_missing');
+  const profile = convertFromFirestoreFields(userDoc.fields || {});
+  if (profile.role !== 'responsible' || profile.status !== 'active' || !['day', 'night'].includes(profile.shift)) {
+    throw createHttpError('حساب المسؤول غير مربوط بورديّة صحيحة؛ راجع المشرف العام', 403, 'responsible_shift_missing');
+  }
+  return profile.shift;
 }
 
 export function assertSuperAdminManagementAccountsPermission(role) {
