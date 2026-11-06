@@ -11,7 +11,7 @@ const roleLabel: Record<ContactRecord['role'], string> = {
   worker: 'مشرف العمال'
 };
 
-export const PrivateMessagesPanel: React.FC = () => {
+export const PrivateMessagesPanel: React.FC<{ initialContactUid?: string }> = ({ initialContactUid }) => {
   const [contacts, setContacts] = useState<ContactRecord[]>([]);
   const [selectedUid, setSelectedUid] = useState('');
   const [messages, setMessages] = useState<ChatMessage[]>([]);
@@ -84,12 +84,17 @@ export const PrivateMessagesPanel: React.FC = () => {
   const refreshContacts = useCallback(async () => {
     try {
       const result = await listContacts();
-      setContacts(result.data || []);
-      setSelectedUid(current => current || result.data?.[0]?.uid || '');
+      const nextContacts = result.data || [];
+      setContacts(nextContacts);
+      setSelectedUid(current => (
+        initialContactUid && nextContacts.some(contact => contact.uid === initialContactUid)
+          ? initialContactUid
+          : current || nextContacts[0]?.uid || ''
+      ));
     } catch (err) {
       setError(err instanceof Error ? err.message : 'تعذر تحميل قائمة المستخدمين.');
     }
-  }, []);
+  }, [initialContactUid]);
 
   const refreshMessages = useCallback(async () => {
     if (!selectedUid) { setMessages([]); return; }
