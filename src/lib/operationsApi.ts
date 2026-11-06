@@ -100,6 +100,6 @@ export const recordMyProgress = (id: string, payload: ProgressPayload) => reques
 export const listMyConversation = () => request<OperationsResponse<ChatMessage[]>>('/api/worker/messages');
 export const sendWorkerMessage = (text: string) => request<OperationsResponse<ChatMessage>>('/api/worker/messages', { method: 'POST', body: JSON.stringify({ text }) });
 
-export interface NotificationRecord { id: string; type: string; title: string; body: string; relatedId?: string; createdAt: string; readAt?: string | null; }
+export interface NotificationRecord { id: string; type: string; title: string; body: string; relatedId?: string; relatedUserId?: string; createdAt: string; readAt?: string | null; }
 export const listNotifications = () => request<OperationsResponse<NotificationRecord[]>>('/api/notifications');
 export const markNotificationRead = (id: string) => request<OperationsResponse<NotificationRecord>>(`/api/notifications/${encodeURIComponent(id)}/read`, { method: 'PUT' });

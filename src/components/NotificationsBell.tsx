@@ -4,7 +4,7 @@ import { Bell, Check, X, Volume2 } from 'lucide-react';
 import { listNotifications, markNotificationRead } from '../lib/operationsApi';
 import type { NotificationRecord } from '../types/operations';
 
-export const NotificationsBell: React.FC = () => {
+export const NotificationsBell: React.FC<{ onOpenNotification: (notification: NotificationRecord) => void }> = ({ onOpenNotification }) => {
   const [items, setItems] = useState<NotificationRecord[]>([]);
   const [open, setOpen] = useState(false);
   const [error, setError] = useState('');
@@ -28,7 +28,7 @@ export const NotificationsBell: React.FC = () => {
      } catch (e) { console.warn('Message audio could not be unlocked:', e); }
   };
 
-  const playMessageSound = async (mode: 'soft' | 'bright' | 'strong' = soundMode === 'silent' ? 'strong' : soundMode) => {
+  const playMessageSound = async (mode: 'soft' | 'bright' | 'strong' | 'silent' = soundMode) => {
     if (mode === 'silent') return;
     try {
       if (!audioContextRef.current || audioContextRef.current.state === 'closed') {
@@ -128,6 +128,12 @@ export const NotificationsBell: React.FC = () => {
     }
   };
 
+  const openNotification = async (item: NotificationRecord) => {
+    await markRead(item.id);
+    setOpen(false);
+    onOpenNotification(item);
+  };
+
   const unread = items.filter(x => !x.readAt).length;
 
   return (
@@ -181,8 +187,17 @@ export const NotificationsBell: React.FC = () => {
             <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain">
               {items.map(item => (
                 <article key={item.id} className="border-b border-white/5 p-4">
-                  <b className="block text-sm text-white">{item.title}</b>
-                  <p className="mt-1 text-sm leading-6 text-gray-300">{item.body}</p>
+                  <button
+                    type="button"
+                    onClick={() => { if (item.type === 'direct_message' || item.type.startsWith('task_')) void openNotification(item); }}
+                    disabled={item.type !== 'direct_message' && !item.type.startsWith('task_')}
+                    className="block w-full text-right disabled:cursor-default"
+                    aria-label={item.type === 'direct_message' ? 'فتح المحادثة الخاصة' : item.type.startsWith('task_') ? 'فتح أمر الإنتاج المرتبط' : 'الإشعار'}
+                  >
+                    <b className="block text-sm text-white">{item.title}</b>
+                    <p className="mt-1 text-sm leading-6 text-gray-300">{item.body}</p>
+                    {(item.type === 'direct_message' || item.type.startsWith('task_')) && <span className="mt-2 inline-block text-xs text-[#F5D77F]">{item.type === 'direct_message' ? 'اضغط لفتح المحادثة ←' : 'اضغط لفتح أمر الإنتاج ←'}</span>}
+                  </button>
                   <div className="mt-3 flex items-center justify-between gap-3">
                     <time className="text-[10px] text-gray-500">
                       {new Date(item.createdAt).toLocaleString('ar-TN', { timeZone: 'Africa/Tunis' })}

@@ -9,9 +9,9 @@ import type { TaskRecord, WorkerRecord, MachineCycleRecord } from '../types/oper
 import type { UserProfile } from '../lib/firebase';
 
 type Section = 'workers' | 'tasks' | 'messages' | 'cycles';
-interface Props { initialSection: 'workers' | 'tasks'; admin: UserProfile; }
+interface Props { initialSection: 'workers' | 'tasks'; admin: UserProfile; focusTaskId?: string; }
 
-export const OperationsPanel: React.FC<Props> = ({ initialSection, admin }) => {
+export const OperationsPanel: React.FC<Props> = ({ initialSection, admin, focusTaskId }) => {
   const isSupervisor = admin.role === 'super_admin';
   const canFreezeWorkers = ['super_admin', 'admin', 'responsible'].includes(admin.role);
   const isResponsible = admin.role === 'responsible';
@@ -47,6 +47,14 @@ export const OperationsPanel: React.FC<Props> = ({ initialSection, admin }) => {
   const [notice, setNotice] = useState<string | null>(null);
   const [pending, setPending] = useState(0);
   const [busy, setBusy] = useState(false);
+
+  useEffect(() => {
+    if (focusTaskId) setSection('tasks');
+  }, [focusTaskId]);
+  useEffect(() => {
+    if (!focusTaskId || section !== 'tasks' || !tasks.length) return;
+    document.getElementById(`admin-task-${focusTaskId}`)?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+  }, [focusTaskId, section, tasks]);
 
   const loadMoreCycles = async () => {
     if (!cycleNextPageToken || loadingMoreCycles) return;
@@ -311,7 +319,7 @@ export const OperationsPanel: React.FC<Props> = ({ initialSection, admin }) => {
           <button className="gold-button">تسجيل الإنجاز</button>
         </form>
       </div>
-      <div className="space-y-2">{tasks.map(t => <article key={t.id} className="rounded-xl border border-white/10 bg-[#0A0A0A] p-3">
+      <div className="space-y-2">{tasks.map(t => <article id={`admin-task-${t.id}`} key={t.id} className="rounded-xl border border-white/10 bg-[#0A0A0A] p-3">
         <div className="flex justify-between gap-2"><b>{t.modelName || t.title}</b><span className="text-xs text-[#F5D77F]">{taskStatusLabel(t.status)}</span></div>
         {t.description && <p className="text-sm text-gray-400 mt-1">{t.description}</p>}
         <p className="text-xs text-gray-400 mt-1">المكينة: {t.machineNumber ?? '—'} · الوردية: {t.shift === 'day' ? 'نهار' : t.shift === 'night' ? 'ليل' : '—'} · مشرف العمال: {t.assignedWorkerName || t.assignedWorkerId} · المطلوب: {t.targetQuantity} · المنجز: {t.completedQuantity} · المتبقي: {Math.max(0, t.targetQuantity - t.completedQuantity)}</p>

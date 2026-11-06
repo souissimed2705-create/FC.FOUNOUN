@@ -5,12 +5,14 @@ on:
     branches:
       - fix/full-project-repair
       - fix/operations-contracts-rbac
+      - fix/cloudflare-bun-lockfile
       - main
   push:
     branches:
       - fix/operations-contracts
       - fix/operations-contracts-rbac
       - fix/pbkdf2-firestore-diagnostics
+      - fix/notification-click-navigation
 
 permissions:
   contents: read

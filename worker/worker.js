@@ -1230,13 +1230,14 @@ async function handleListContacts(callerUid, projectId, accessToken, corsHeaders
   return jsonResponse({ success: true, data: contacts }, 200, corsHeaders);
 }
 
-async function createUserNotification(recipientUid, type, title, body, relatedId, projectId, accessToken) {
+async function createUserNotification(recipientUid, type, title, body, relatedId, projectId, accessToken, relatedUserId = '') {
   if (typeof recipientUid !== 'string' || !/^[A-Za-z0-9_-]{3,128}$/.test(recipientUid)) return false;
   const id = `ntf_${crypto.randomUUID().replace(/-/g, '')}`;
   const record = {
     id, recipientUid, type: String(type).slice(0, 40),
     title: String(title).slice(0, 120), body: String(body).slice(0, 500),
     relatedId: String(relatedId || '').slice(0, 128),
+    relatedUserId: typeof relatedUserId === 'string' ? relatedUserId.slice(0, 128) : '',
     createdAt: new Date().toISOString(), readAt: null
   };
   try {
@@ -1372,7 +1373,7 @@ async function handleDirectMessages(request, otherUid, callerUid, callerRole, pr
   conversationWrite.currentDocument = conversationDoc?.updateTime ? { updateTime: conversationDoc.updateTime } : { exists: false };
   const messageWrite = { update: { name: `projects/${projectId}/databases/(default)/documents/messages/${messageId}`, fields: convertToFirestoreFields(message) }, currentDocument: { exists: false } };
   await commitFirestoreTransaction(projectId, accessToken, null, [conversationWrite, messageWrite]);
-  await createUserNotification(otherUid, 'direct_message', 'رسالة جديدة', `رسالة جديدة من ${sender.displayName}.`, messageId, projectId, accessToken);
+  await createUserNotification(otherUid, 'direct_message', 'رسالة جديدة', `رسالة جديدة من ${sender.displayName}.`, messageId, projectId, accessToken, callerUid);
   return jsonResponse({ success: true, data: message }, 201, corsHeaders);
 }
 
