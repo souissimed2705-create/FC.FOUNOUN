@@ -73,6 +73,7 @@ export interface UserProfile {
   role: 'super_admin' | string;
   status: 'active' | string;
   displayName?: string;
+  shift?: 'day' | 'night';
   createdAt?: unknown;
 }
 
@@ -140,6 +141,7 @@ export async function verifyAdmin(uid: string): Promise<UserProfile> {
     role: data.role,
     status: data.status,
     displayName: data.displayName || (data.role === 'super_admin' ? 'المشرف العام' : data.role === 'responsible' ? 'المسؤول' : 'المدير العام'),
+    ...(data.shift === 'day' || data.shift === 'night' ? { shift: data.shift } : {}),
     createdAt: data.createdAt,
   };
 }
