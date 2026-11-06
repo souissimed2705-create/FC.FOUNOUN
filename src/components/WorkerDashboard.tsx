@@ -28,10 +28,6 @@ export const WorkerDashboard: React.FC<Props> = ({ worker, notificationTaskReque
     window.history.pushState({ fcFounounPage: 'worker', page: 'tasks' }, '');
     setPage('tasks');
   }, [notificationTaskRequest?.nonce]);
-  useEffect(() => {
-    if (page !== 'tasks' || !notificationTaskRequest?.id || !tasks.length) return;
-    document.getElementById(`worker-task-${notificationTaskRequest.id}`)?.scrollIntoView({ behavior: 'smooth', block: 'center' });
-  }, [page, tasks, notificationTaskRequest?.nonce]);
   const navigatePage = (next: Page) => {
     window.history.pushState({ fcFounounPage: 'worker', page: next }, '');
     setPage(next);
@@ -41,6 +37,10 @@ export const WorkerDashboard: React.FC<Props> = ({ worker, notificationTaskReque
     else setPage('home');
   };
   const [tasks, setTasks] = useState<TaskRecord[]>([]);
+  useEffect(() => {
+    if (page !== 'tasks' || !notificationTaskRequest?.id || !tasks.length) return;
+    document.getElementById(`worker-task-${notificationTaskRequest.id}`)?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+  }, [page, tasks, notificationTaskRequest?.nonce]);
   const [cycles, setCycles] = useState<MachineCycleRecord[]>([]);
   const [cycleNextPageToken, setCycleNextPageToken] = useState<string | null>(null);
   const [loadingMoreCycles, setLoadingMoreCycles] = useState(false);
